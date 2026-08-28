@@ -169,12 +169,13 @@ prefix_rule(
 )
 
 prefix_rule(
-    pattern = ["make", ["test", "app-refresh-smoke", "app-smoke", "app-render-check"]],
+    pattern = ["make", ["test", "app-refresh-smoke", "app-smoke", "app-smoke-read-only", "app-render-check"]],
     decision = "prompt",
     justification = "These targets launch a macOS browser and must run outside the Codex sandbox, where AppKit otherwise aborts the process.",
     match = [
         "make test",
         "make app-refresh-smoke APP_SMOKE_BROWSER=webkit",
+        "make app-smoke-read-only APP_SMOKE_BROWSER=webkit",
         "make app-render-check",
     ],
 )

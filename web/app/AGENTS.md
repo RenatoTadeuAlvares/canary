@@ -38,6 +38,18 @@ as `human-paired-device`, so browser automation would bypass agent-origin CLI
 classification. Any explicitly requested agent broker write must use the gated
 CLI path described by the root `AGENTS.md`.
 
+When the current authorization forbids pairing or settings mutation, use:
+
+```sh
+make app-smoke-read-only APP_SMOKE_BROWSER=webkit
+```
+
+That mode does not install or restart the app. It requires an already-running
+local host whose installed commit matches the checkout, allows only browser
+GET/HEAD requests, expects the unpaired lock screen, and verifies status,
+embedded asset bytes, listener ownership, and binary provenance. Never use
+`app-smoke` as a substitute: the full live smoke creates a pairing session.
+
 ## Browser Debugging
 
 The in-app Browser can read rendered DOM state, click, and inspect console logs,

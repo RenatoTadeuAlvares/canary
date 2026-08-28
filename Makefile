@@ -84,7 +84,7 @@ RELEASE_WORKTREE_ROOT ?= $(abspath $(CURDIR)/..)
 MCP_REGISTRY_AUTO_LOGIN ?= 1
 MCP_REGISTRY_LOGIN_METHOD ?= github
 
-.PHONY: help reduction-metrics reduction-metrics-check regression-spine-check regression-spine-contract-check build install restart-daemon uninstall test test-pkg test-support test-internal test-daemon test-daemon-default test-daemon-trading test-integration test-integration-live trading-package-scope-check clean install-plugin install-plugin-refresh install-skill uninstall-skill all check commit-check product-identity-check go-dependencies-check go-doc-check gofmt-check vet-check staticcheck-check govulncheck-check fmt app-check app-log-contract-check scheduled-monitor-check app-contract-check app-syntax-check app-browser-helper-check app-auth-check app-behavior-check app-service-worker-check app-render-check remote-relay-check release-packaging-check app-refresh app-refresh-smoke app-smoke release _release-run _release-publish release-resume _release-resume-run release-binaries release-mcpb release-checksums release-payload-inventory-check release-registry-server registry-login release-auth-preflight release-origin-check release-ci-wait _release-ci-wait-historical release-main-candidate-check release-source-candidate-check release-controller-source-check release-source-mode-check release-tag-candidate-check release-plugin-tag-candidate-check release-github-candidate-check release-github-assets registry-publish registry-publish-verify-first release-verify release-smoke release-site-check smoke smoke-build smoke-contract-check smoke-only smoke-fast version plugin-check parity-check modernize modernize-check refresh-spx-members hook-version-check registry-version-check changelog-check changelog-lint changelog-lint-historical docs-html-check pages-build account-data-check hook-behavior-check agent-config-check
+.PHONY: help reduction-metrics reduction-metrics-check regression-spine-check regression-spine-contract-check build install restart-daemon uninstall test test-pkg test-support test-internal test-daemon test-daemon-default test-daemon-trading test-integration test-integration-live trading-package-scope-check clean install-plugin install-plugin-refresh install-skill uninstall-skill all check commit-check product-identity-check go-dependencies-check go-doc-check gofmt-check vet-check staticcheck-check govulncheck-check fmt app-check app-log-contract-check scheduled-monitor-check app-contract-check app-syntax-check app-browser-helper-check app-auth-check app-behavior-check app-service-worker-check app-render-check remote-relay-check release-packaging-check app-refresh app-refresh-smoke app-smoke app-smoke-read-only release _release-run _release-publish release-resume _release-resume-run release-binaries release-mcpb release-checksums release-payload-inventory-check release-registry-server registry-login release-auth-preflight release-origin-check release-ci-wait _release-ci-wait-historical release-main-candidate-check release-source-candidate-check release-controller-source-check release-source-mode-check release-tag-candidate-check release-plugin-tag-candidate-check release-github-candidate-check release-github-assets registry-publish registry-publish-verify-first release-verify release-smoke release-site-check smoke smoke-build smoke-contract-check smoke-only smoke-fast version plugin-check parity-check modernize modernize-check refresh-spx-members hook-version-check registry-version-check changelog-check changelog-lint changelog-lint-historical docs-html-check pages-build account-data-check hook-behavior-check agent-config-check
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*##"; print "Available targets (default: help):\n"} \
@@ -160,6 +160,8 @@ restart-daemon: build ## Install + restart daemon, skipped when the binary is un
 
 APP_SMOKE_URL ?= http://127.0.0.1:8765
 APP_SMOKE_BROWSER ?= chromium
+APP_SMOKE_EXPECT_COMMIT ?= $(COMMIT)
+APP_SMOKE_REQUIRE_READY ?= false
 app-check: app-log-contract-check app-contract-check app-syntax-check app-browser-helper-check app-auth-check app-behavior-check app-service-worker-check ## Fast app gate: production logging + SPA contracts
 
 app-log-contract-check: ## Reject production app log emitters without an explicit severity
@@ -188,7 +190,7 @@ app-syntax-check: ## Embedded PWA assets parse: all web/app/*.js (node --check) 
 
 app-browser-helper-check: ## Browser launcher fails safely inside the macOS Codex sandbox
 	@command -v node >/dev/null 2>&1 || { echo "app-browser-helper-check: node not found — this gate is binding, install Node.js" >&2; exit 1; }
-	node --test scripts/lib-app-browser_test.mjs
+	node --test scripts/lib-app-browser_test.mjs scripts/lib-app-read-only-smoke_test.mjs
 
 app-auth-check: ## Execute browser credential-storage and crypto-less pairing contracts
 	@command -v node >/dev/null 2>&1 || { echo "app-auth-check: node not found — this gate is binding, install Node.js" >&2; exit 1; }
@@ -237,8 +239,18 @@ app-refresh: install ## Install, restart the shared app host, and print a local 
 app-refresh-smoke: app-refresh ## Refresh the shared app host, then run the browser app smoke
 	$(MAKE) app-smoke APP_SMOKE_URL=$(APP_SMOKE_URL) APP_SMOKE_BROWSER=$(APP_SMOKE_BROWSER)
 
-app-smoke: ## Browser-smoke a running Canary app without scanning a QR code
+app-smoke: ## Pair and browser-smoke a running Canary app without manually scanning its QR code
 	node scripts/app-browser-smoke.mjs --base-url $(APP_SMOKE_URL) --browser $(APP_SMOKE_BROWSER) --no-notification
+
+app-smoke-read-only: ## GET-only app/browser/status/static/listener/provenance smoke; never pairs or mutates app state
+	node scripts/app-browser-smoke.mjs \
+		--base-url $(APP_SMOKE_URL) \
+		--browser $(APP_SMOKE_BROWSER) \
+		--read-only=true \
+		--asset-root "$(CURDIR)/web/app" \
+		--canary-bin "$(PREFIX)/bin/canary" \
+		--expected-commit $(APP_SMOKE_EXPECT_COMMIT) \
+		--require-ready=$(APP_SMOKE_REQUIRE_READY)
 
 app-render-check: ## Hermetic production-app render with synthetic pairing/reload/auth recovery; never reads desk account data
 	PLAYWRIGHT_NODE_MODULES="$(CURDIR)/web/app/node_modules" node scripts/app-browser-smoke.mjs \

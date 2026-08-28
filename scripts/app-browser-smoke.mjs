@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPairingSession, launchBrowser, loadPlaywright, parseArgs } from "./lib-app-browser.mjs";
+import { runReadOnlyAppSmoke } from "./lib-app-read-only-smoke.mjs";
 
 const args = parseArgs(process.argv.slice(2));
 const baseURL = trimRight(args["base-url"] || "http://127.0.0.1:8765", "/");
@@ -14,6 +15,7 @@ const noNotification = args["no-notification"] !== "false";
 const noWebCrypto = args["no-webcrypto"] === "true";
 const mobile = args.mobile !== "false";
 const round4Synthetic = args["round4-synthetic"] === "true";
+const readOnly = args["read-only"] === "true";
 const rawGatewayCopyPattern = /gateway_unavailable|ibkr connection unavailable|quote\.snapshot|account\.summary|positions\.list/i;
 const staleStressDomainCopyPattern = /\b(?:canary (?:snapshot|driver|drivers|trigger|market read|portfolio snapshot)|defensive canary action|canary as a market signal)\b/i;
 
@@ -24,16 +26,37 @@ if (!playwright[browserName]) {
   process.exit(2);
 }
 
+if (round4Synthetic && readOnly) {
+  console.error("app-browser-smoke: --round4-synthetic and --read-only are mutually exclusive");
+  process.exit(2);
+}
+
 if (round4Synthetic) {
   await runRound4SyntheticSmoke();
   process.exit(0);
 }
 
-const pairing = await createPairingSession(baseURL, pairPublicURL);
 const launchOptions = { headless: true };
 if (channel) {
   launchOptions.channel = channel;
 }
+
+if (readOnly) {
+  await runReadOnlyAppSmoke({
+    assetRoot: args["asset-root"] || "",
+    baseURL,
+    browserName,
+    browserType: playwright[browserName],
+    canaryBin: args["canary-bin"] || "",
+    expectedCommit: args["expected-commit"] || "",
+    launchOptions,
+    mobile,
+    requireReady: args["require-ready"] === "true",
+  });
+  process.exit(0);
+}
+
+const pairing = await createPairingSession(baseURL, pairPublicURL);
 
 async function runRound4SyntheticSmoke() {
   // WebKit stores but does not attach cookies to an intercepted `.invalid`

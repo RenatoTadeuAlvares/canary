@@ -106,6 +106,7 @@ make app-refresh-smoke APP_SMOKE_BROWSER=webkit
 canary restart --app --timeout 15s
 canary app restart --timeout 15s
 make app-smoke APP_SMOKE_BROWSER=webkit
+make app-smoke-read-only APP_SMOKE_BROWSER=webkit
 make app-render-check APP_SMOKE_BROWSER=webkit
 ```
 
@@ -114,6 +115,14 @@ recovery, and production-SPA rendering. It is fully synthetic and blocks every
 external request, so it cannot attach to the desk daemon or read account data.
 App-process restart behavior is exercised separately by the CLI restart tests;
 do not combine it with a browser fixture that discovers the default daemon.
+
+`app-smoke` creates a short-lived pairing session for the full live UI smoke.
+`app-smoke-read-only` is the deployment-integrity alternative when pairing and
+settings mutation are forbidden: it makes no lifecycle change, allows only
+GET/HEAD browser requests, verifies the unpaired shell and every embedded asset,
+and reconciles app status, listener ownership, installed binary, and checkout
+commit. `APP_SMOKE_REQUIRE_READY=true` additionally makes alert-pipeline
+readiness binding.
 
 For source edits, prefer `make app-refresh` before Browser verification because
 the SPA is embedded in the installed `canary` binary. The detailed development

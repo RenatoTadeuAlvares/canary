@@ -156,6 +156,12 @@ bypasses the framework environment established by `pw_run.sh`.
 This is execution permission only: paired-browser QA remains read-only and
 never grants broker-write authority.
 
+When pairing or settings mutation is not authorized, use
+`make app-smoke-read-only`. It runs a fresh GET-only browser, verifies app
+status, served assets, listener ownership, and exact installed provenance, and
+fails if the page attempts any non-read request. It never creates a pairing
+session. Do not substitute `app-smoke`, which deliberately creates one.
+
 For long sessions, compact or hand off at phase boundaries and preserve gateway
 pins, freeze state, and committed versus in-flight work. See
 `.agents/docs/agent-session-hygiene.md` for rationale.

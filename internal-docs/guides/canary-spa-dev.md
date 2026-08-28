@@ -51,6 +51,22 @@ For rendered behavior:
 make app-refresh-smoke APP_SMOKE_BROWSER=webkit
 ```
 
+The full live smoke creates and completes a short-lived pairing session. When
+deployment verification is authorized to read the running app but pairing and
+settings mutation are forbidden, use the explicit non-mutating mode instead:
+
+```sh
+make app-smoke-read-only APP_SMOKE_BROWSER=webkit
+```
+
+It does not install or restart anything. Against the already-running loopback
+host it allows only GET/HEAD requests, expects the unpaired lock screen,
+compares every served embedded asset with this checkout, validates the
+local-only app-status contract, and ties the single listener to the installed
+binary and exact checkout commit. Set `APP_SMOKE_REQUIRE_READY=true` when alert
+producer/dispatcher readiness is part of acceptance; otherwise readiness is
+reported separately from HTTP/deployment integrity.
+
 Before completion, still run the repo gate from `AGENTS.md` when the task is
 expected to be done end to end.
 
