@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyReadOnlyRequest, normalizeReadOnlySmokeURL, parseLsofRecords } from "./lib-app-read-only-smoke.mjs";
+import { classifyReadOnlyRequest, normalizeReadOnlySmokeURL, parseLsofRecords, readOnlySmokeAuthMode } from "./lib-app-read-only-smoke.mjs";
+
+test("fresh browser accepts only an unpaired response or a strict read-only preview grant", () => {
+  assert.equal(readOnlySmokeAuthMode(401, null), "unpaired");
+  assert.equal(readOnlySmokeAuthMode(200, { authenticated: true, read_only: true }), "preview");
+  for (const auth of [undefined, {}, { authenticated: true }, { authenticated: true, read_only: false }, { authenticated: false, read_only: true }, { authenticated: true, read_only: "true" }]) {
+    assert.throws(() => readOnlySmokeAuthMode(200, auth), /explicit read-only preview grant/);
+  }
+  assert.throws(() => readOnlySmokeAuthMode(403, { authenticated: true, read_only: true }), /explicit read-only preview grant/);
+});
 
 test("read-only smoke accepts only local origin URLs", () => {
   assert.equal(normalizeReadOnlySmokeURL("http://127.0.0.1:8765").origin, "http://127.0.0.1:8765");
@@ -14,6 +23,8 @@ test("read-only browser policy permits same-origin reads only", () => {
   const origin = "http://127.0.0.1:8765";
   assert.equal(classifyReadOnlyRequest("GET", `${origin}/app.js`, origin).allowed, true);
   assert.equal(classifyReadOnlyRequest("HEAD", `${origin}/manifest.webmanifest`, origin).allowed, true);
+  assert.equal(classifyReadOnlyRequest("GET", `${origin}/api/update`, origin).allowed, true);
+  assert.equal(classifyReadOnlyRequest("POST", `${origin}/api/update`, origin).reason, "mutating_method");
   assert.deepEqual(
     classifyReadOnlyRequest("POST", `${origin}/api/pairing/sessions`, origin).reason,
     "mutating_method",

@@ -111,6 +111,32 @@ CLI/MCP parity, and source-preserving compact projections.
 The production SPA's synthetic mobile browser fixture exercises horizon
 disagreement, unavailable buckets, frozen context, richer downside pricing and
 safe text rendering. It accesses no desk account and is separate from physical
-phone pairing or installability proof. Final combined `make test`, staged
-`make check`, installation and read-only runtime evidence are recorded by the
-orchestrating task after the source freezes. No release is part of this task.
+phone pairing or installability proof.
+
+The combined product commit `0474b1651bd800e3706e2e1d228df1490f27358b`,
+including the concurrent Edge changes, passed `make test` (including `check`,
+race tests, both daemon build modes and all four regression-spine mutants).
+It was installed from a clean detached checkout. The first restart encountered
+a new daemon already started by the existing app; version, executable and
+Gateway readiness verified the intended clean build, and the repeated
+`make restart-daemon` correctly skipped a redundant restart.
+
+Fresh installed CLI and MCP reads preserve the same gamma/breadth measurements
+(excluding per-read clocks). The direct Regime RPC reports healthy funding,
+aligned CP/T-bill dates and a populated five-publication change. Gamma is cold
+under the new method while options are off-session; breadth is rebuilding its
+longer history. Regime correctly remains in data quality rather than reporting
+a complete fresh signal.
+
+`make app-smoke-read-only` on the isolated `127.0.0.1:8766` preview verifies
+exact installed provenance, listener ownership, source-matching assets, the
+server's explicit read-only grant, same-origin reads, and zero pairing/credential
+writes. It checks the visible app surface and the read-only marker in its status
+text; the existing status text is visually hidden, so this proves no visible
+read-only badge.
+The driver was corrected to accept the explicit preview grant as well as the
+normal unpaired screen; normal authenticated sessions and non-read requests
+remain rejected. Its follow-up changes affect only the test driver and this
+evidence note, with `make check` as the pre-commit gate. The installed product
+and served assets remain the tested `0474b165` build. The shared phone app host
+was left untouched. No release is part of this task.

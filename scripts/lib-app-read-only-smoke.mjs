@@ -7,6 +7,13 @@ import { launchBrowser } from "./lib-app-browser.mjs";
 
 const allowedMethods = new Set(["GET", "HEAD"]);
 const servedAssetExtensions = new Set([".css", ".js", ".png", ".webmanifest"]);
+const previewAPIPaths = new Set(["/api/bootstrap", "/api/events", "/api/orders/open", "/api/alerts", "/api/alerts/attention", "/api/update"]);
+
+export function readOnlySmokeAuthMode(status, auth) {
+  if (status === 401) return "unpaired";
+  if (status === 200 && auth?.authenticated === true && auth?.read_only === true) return "preview";
+  throw new Error("fresh read-only browser requires an unpaired host or an explicit read-only preview grant");
+}
 
 export function normalizeReadOnlySmokeURL(value) {
   let url;
@@ -118,20 +125,30 @@ export async function runReadOnlyAppSmoke({
       }
     });
 
-    const navigation = await page.goto(new URL("/", base).href, { waitUntil: "domcontentloaded", timeout: 15000 });
+    const [bootstrap, navigation] = await Promise.all([
+      page.waitForResponse((response) => response.url() === new URL("/api/bootstrap", base).href, { timeout: 15000 }),
+      page.goto(new URL("/", base).href, { waitUntil: "domcontentloaded", timeout: 15000 }),
+    ]);
     if (!navigation || navigation.status() !== httpStatusOK) {
       throw new Error(`read-only browser root status = ${navigation?.status() ?? "missing"}, want ${httpStatusOK}`);
     }
-    await page.waitForSelector("#pairingPanel:not([hidden])", { timeout: 15000 });
+    const auth = bootstrap.status() === httpStatusOK ? (await bootstrap.json()).auth : null;
+    const authMode = readOnlySmokeAuthMode(bootstrap.status(), auth);
+    await page.waitForSelector(authMode === "preview" ? "#bottomTabs:not([hidden])" : "#pairingPanel:not([hidden])", { timeout: 15000 });
     const browserState = await page.evaluate(() => ({
       bottom_tabs_hidden: document.getElementById("bottomTabs")?.hidden === true,
+      pairing_hidden: document.getElementById("pairingPanel")?.hidden === true,
+      read_only_marker: /read-only/.test(document.getElementById("connectionLine")?.textContent || ""),
       device_id_stored: Boolean(localStorage.getItem("ibkrDeviceID")),
       device_key_stored: Boolean(localStorage.getItem("ibkrDeviceKeyJWK")),
       pairing_text: document.getElementById("pairingText")?.textContent?.trim() || "",
       title: document.title,
     }));
-    if (browserState.title !== "Canary" || !browserState.bottom_tabs_hidden || !/scan a fresh qr code/i.test(browserState.pairing_text)) {
-      throw new Error(`unpaired read-only browser state failed: ${JSON.stringify(browserState)}`);
+    const expectedSurface = authMode === "preview"
+      ? !browserState.bottom_tabs_hidden && browserState.pairing_hidden && browserState.read_only_marker
+      : browserState.bottom_tabs_hidden && !browserState.pairing_hidden && /scan a fresh qr code/i.test(browserState.pairing_text);
+    if (browserState.title !== "Canary" || !expectedSurface) {
+      throw new Error(`${authMode} read-only browser state failed: ${JSON.stringify(browserState)}`);
     }
     if (browserState.device_id_stored || browserState.device_key_stored) {
       throw new Error(`read-only browser created a device credential: ${JSON.stringify(browserState)}`);
@@ -150,7 +167,7 @@ export async function runReadOnlyAppSmoke({
       throw new Error(`read-only browser page errors: ${pageErrors.join("\n")}`);
     }
     const unexpectedConsole = consoleErrors.filter((entry) => (
-      !(/failed to load resource/i.test(entry.text) && entry.url.endsWith("/api/bootstrap"))
+      !(authMode === "unpaired" && /failed to load resource/i.test(entry.text) && entry.url.endsWith("/api/bootstrap"))
       && entry.text !== "Service Worker registration blocked by Playwright"
     ));
     if (unexpectedConsole.length > 0) {
@@ -158,13 +175,18 @@ export async function runReadOnlyAppSmoke({
     }
 
     const apiRequests = requests.filter((request) => new URL(request.url).pathname.startsWith("/api/"));
-    if (apiRequests.length !== 1 || apiRequests[0].method !== "GET" || new URL(apiRequests[0].url).pathname !== "/api/bootstrap") {
+    const bootstrapReads = apiRequests.filter((request) => new URL(request.url).pathname === "/api/bootstrap");
+    const expectedReads = authMode === "preview"
+      ? bootstrapReads.length >= 1 && apiRequests.every((request) => request.method === "GET" && previewAPIPaths.has(new URL(request.url).pathname))
+      : apiRequests.length === 1 && bootstrapReads.length === 1 && apiRequests[0].method === "GET";
+    if (!expectedReads) {
       throw new Error(`unexpected read-only browser API requests: ${JSON.stringify(apiRequests)}`);
     }
 
     console.log(JSON.stringify({
       ok: true,
       mode: "read-only",
+      auth_mode: authMode,
       browser: browserName,
       channel: launched.channel || null,
       base_url: base.origin,
