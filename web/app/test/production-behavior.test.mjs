@@ -65,6 +65,8 @@ function reset() {
     pairingRequired: false, connectionOK: false, connectionText: "Connecting", eventSource: null,
     readOnlyPreview: false, updateStatus: null, updatePollTimer: null, updateCompleteTimer: null,
     portfolioDetailOpen: false, protectionOpen: false, protectionQtyOverrides: {}, protectionQuoteTicks: {},
+    protectionPreviewBusy: "", protectionPreviews: {}, protectionSubmitBusy: "", protectionSubmits: {},
+    proposalMarketCalendars: {}, proposalMarketCalendarBusy: {},
     selectedUnderlying: "", positionsSort: "impact",
     protectionSnapshotBusy: false, protectionSnapshotLastAt: 0, protectionSnapshotNotice: "",
     protectionDerisk: { percent: 25, busy: "", result: null, submitted: null, requestRef: "", previewedAt: 0, abort: null },
@@ -1253,6 +1255,118 @@ test("stale positions never render an empty clean book and retain nonempty rows 
   assert.match(dom.element("underlyingBookStatus").textContent, /visible for reference/i);
   assert.match(dom.element("underlyingBookList").textContent, /SYN/);
   assert.equal(dom.element("underlyingWinnerPnl").textContent, "Unavailable", "stale rows must not publish a clean or current P/L summary");
+});
+
+function protectionActionFixture() {
+  const proposal = {
+    key: "synthetic-protection", revision: "synthetic-revision", state: "generated",
+    symbol: "SYN", bucket: "trailing_stop", action: "SELL", quantity: 2, max_quantity: 4,
+    contract: { sec_type: "STK", currency: "USD" },
+  };
+  state.protectionOpen = true;
+  state.proposalMarketCalendars.us = { market: "us", session: { is_open: true } };
+  state.snapshot = {
+    trading: { can_preview: true, can_write: true, account: "SYNTHETIC-PAPER", mode: "paper" },
+    positions: {
+      stocks: [{ symbol: "SYN", con_id: 42, quantity: 4 }], options: [],
+      portfolio: { dollar_delta_base: 400 },
+      protection_coverage: { by_underlying: [{ underlying: "SYN", state: "unprotected" }] },
+    },
+    proposals: { revision: "synthetic-revision", proposals: [proposal], counts: { total: 1, actionable: 1 } },
+    auto_trade: {}, market_events: {},
+  };
+  return proposal;
+}
+
+test("read-only protection explains and disables stop, repair, ignore, and portfolio trim actions", () => {
+  reset();
+  const proposal = protectionActionFixture();
+  state.readOnlyPreview = true;
+  state.protectionPreviews[protection.protectionPreviewStateKey(proposal)] = { submit_eligible: true };
+  state.protectionDerisk.result = { eligible_count: 1, legs: [{ symbol: "SYN", action: "SELL", reduce_quantity: 1, submit_eligible: true }] };
+  state.protectionDerisk.previewedAt = Date.now();
+  try {
+    protection.renderProtectionPanel(state.snapshot.proposals);
+    const row = dom.element("protectionRows");
+    for (const className of ["protection-preview", "protection-submit", "protection-ignore"]) {
+      const [button] = byClass(row, className);
+      assert.ok(button, `${className} must remain visible`);
+      assert.equal(button.disabled, true, `${className} must respect browser permissions even when trading is ready`);
+      assert.match(button.title, /Read-only preview.*paired Canary app/);
+    }
+    const [repair] = byClass(dom.element("protectionCoverageRepair"), "protection-repair__request");
+    assert.equal(repair.disabled, true);
+    assert.match(repair.title, /Read-only preview/);
+    assert.equal(dom.element("protectionDeriskPercent").disabled, true);
+    assert.equal(dom.element("protectionDeriskPreview").disabled, true);
+    assert.match(dom.element("protectionDeriskPreview").title, /Read-only preview/);
+    const [submit] = byClass(dom.element("protectionDeriskBasket"), "protection-derisk__submit");
+    assert.equal(submit.disabled, true, "retained eligible baskets cannot enable submission in read-only mode");
+    assert.match(submit.title, /Read-only preview/);
+    assert.match(dom.element("protectionDeriskState").textContent, /Read-only preview.*paired Canary app/);
+
+    for (const positions of [{ stocks: [] }, { stocks: [{ con_id: 42, quantity: 4 }] }]) {
+      state.snapshot.positions = positions;
+      protection.renderProtectionDerisk();
+      assert.match(dom.element("protectionDeriskState").textContent, /Read-only preview/,
+        "the browser restriction must stay clear when holdings or delta are unavailable");
+    }
+  } finally {
+    protection.cancelProtectionDerisk();
+  }
+});
+
+test("protection handlers reject stale action controls after switching to read-only and keep snapshot reads available", async () => {
+  reset();
+  const proposal = protectionActionFixture();
+  const previewKey = protection.protectionPreviewStateKey(proposal);
+  state.protectionPreviews[previewKey] = { submit_eligible: true };
+  state.protectionDerisk.result = { eligible_count: 1 };
+  assert.equal(protection.protectionPreviewSubmitGate(proposal, state.protectionPreviews[previewKey]).ready, true);
+  const requests = [];
+  globalThis.fetch = async (url, init = {}) => {
+    requests.push(`${init.method || "GET"} ${url}`);
+    return response(state.snapshot.proposals);
+  };
+  state.readOnlyPreview = true;
+  await protection.previewProtectionProposal(proposal);
+  await protection.submitProtectionProposal(proposal);
+  await protection.requestProtectionStop({ underlying: "SYN" });
+  await protection.ignoreProtectionProposal(proposal);
+  await protection.previewProtectionDerisk();
+  await protection.submitProtectionDerisk();
+  assert.deepEqual(requests, [], "read-only action handlers must return before making any request");
+  assert.equal(state.protectionPreviewBusy, "");
+  assert.equal(state.protectionSubmitBusy, "");
+  assert.equal(state.protectionDerisk.busy, "");
+  await protection.refreshProtectionProposals();
+  assert.deepEqual(requests, ["GET /api/proposals"], "read-only refresh uses the snapshot read route");
+});
+
+test("paired protection retains broker preview and submit eligibility gates", async () => {
+  reset();
+  const proposal = protectionActionFixture();
+  assert.equal(protection.protectionPreviewGate(proposal).ready, true);
+  assert.equal(protection.protectionPreviewSubmitGate(proposal).ready, false, "submission still requires a preview");
+  const requests = [];
+  globalThis.fetch = async (url, init = {}) => {
+    requests.push({ url, method: init.method, body: JSON.parse(init.body) });
+    return response({ submit_eligible: true, preview: { what_if: { status: "accepted" } } });
+  };
+  await protection.previewProtectionProposal(proposal);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "/api/proposals/preview");
+  assert.equal(requests[0].method, "POST");
+  assert.equal(requests[0].body.key, proposal.key);
+  assert.equal(requests[0].body.revision, proposal.revision);
+  assert.equal(requests[0].body.quantity, proposal.quantity);
+  const [submit] = byClass(dom.element("protectionRows"), "protection-submit");
+  assert.equal(submit.disabled, false, "a paired, eligible preview still exposes submission");
+  state.snapshot.trading.can_write = false;
+  protection.renderProtectionPanel(state.snapshot.proposals);
+  assert.equal(byClass(dom.element("protectionRows"), "protection-submit")[0].disabled, true);
+  state.snapshot.trading.can_preview = false;
+  assert.equal(protection.protectionPreviewGate(proposal).ready, false);
 });
 
 test("TestAppJSProtectionFastPathKeepsHardMarketEventBlocker replacement re-evaluates current active blockers at preview and submit", () => {

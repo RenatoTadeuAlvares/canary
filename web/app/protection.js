@@ -7,6 +7,8 @@ import { $, accountBaseCurrency, blockerText, calendarDate, cleanDetail, compact
 import { currentMarketCalendar, marketSessionLabel } from "./shell.js";
 import { state } from "./state.js";
 
+const PROTECTION_READ_ONLY_REASON = "Read-only preview. Use your paired Canary app for protection actions.";
+
 function renderProtectionPanel(proposals = {}, autoTrade = {}, marketEvents = state.snapshot?.market_events || {}) {
   const panel = $("protectionPanel");
   const detail = $("protectionDetailPanel");
@@ -168,6 +170,7 @@ function protectionRepairRow(row = {}, trading = {}) {
 // mirrors the submit gate's trading checks. Proposal-level blockers arrive
 // from the daemon after the request.
 function protectionStopRequestGate(trading = {}) {
+  if (state.readOnlyPreview) return { ready: false, reason: PROTECTION_READ_ONLY_REASON };
   if (!trading.can_write) return { ready: false, reason: protectionWriteUnavailableReason(trading) };
   if (!protectionWriteConfirmation()) return { ready: false, reason: "Current trading account/mode is unavailable in this snapshot" };
   return { ready: true, reason: "" };
@@ -196,6 +199,7 @@ function protectionRepairConID(symbol = "") {
 }
 
 async function requestProtectionStop(row = {}) {
+  if (state.readOnlyPreview) return;
   const symbol = normalizeSymbol(row.underlying || row.symbol || "");
   if (!symbol || state.protectionStopRequestBusy) return;
   const confirmation = protectionWriteConfirmation();
@@ -275,9 +279,10 @@ function renderProtectionDerisk() {
     const previewBtn = $("protectionDeriskPreview");
     previewBtn.disabled = true;
     previewBtn.textContent = "Preview";
+    previewBtn.title = state.readOnlyPreview ? PROTECTION_READ_ONLY_REASON : "";
     $("protectionDeriskCancel").hidden = true;
     $("protectionDeriskBasket").hidden = true;
-    $("protectionDeriskState").textContent = "No reduce-eligible holding right now — the sweep trims stocks, ETFs, and long options; closed or defunct positions do not count.";
+    $("protectionDeriskState").textContent = state.readOnlyPreview ? PROTECTION_READ_ONLY_REASON : "No reduce-eligible holding right now — the sweep trims stocks, ETFs, and long options; closed or defunct positions do not count.";
     return;
   }
   // The trim sizes by Δ-adjusted risk; when the portfolio delta itself is
@@ -285,13 +290,13 @@ function renderProtectionDerisk() {
   const deltaUnavailable = !hasNumericValue(portfolio.dollar_delta_base ?? portfolio.dollar_delta_ccy);
   const percentPicker = $("protectionDeriskPercent");
   percentPicker.value = String(d.percent);
-  percentPicker.disabled = deltaUnavailable;
+  percentPicker.disabled = state.readOnlyPreview || deltaUnavailable;
   const previewBtn = $("protectionDeriskPreview");
-  previewBtn.disabled = d.busy !== "" || deltaUnavailable;
-  previewBtn.title = deltaUnavailable ? "Portfolio delta is unavailable — the trim needs portfolio Greeks to size a basket." : "";
+  previewBtn.disabled = state.readOnlyPreview || d.busy !== "" || deltaUnavailable;
+  previewBtn.title = state.readOnlyPreview ? PROTECTION_READ_ONLY_REASON : deltaUnavailable ? "Portfolio delta is unavailable — the trim needs portfolio Greeks to size a basket." : "";
   if (d.busy === "preview") previewBtn.textContent = "Previewing…";
   else previewBtn.textContent = deriskPreviewExpired() ? "Preview again" : "Preview";
-  if (deltaUnavailable && d.busy === "" && !d.result && !d.submitted) {
+  if (!state.readOnlyPreview && deltaUnavailable && d.busy === "" && !d.result && !d.submitted) {
     $("protectionDeriskState").textContent = "Delta unavailable — trimming needs portfolio Greeks, which are missing in this snapshot.";
     renderProtectionDeriskBasket();
     const cancelHidden = $("protectionDeriskCancel");
@@ -341,6 +346,7 @@ function syncDeriskValidityTicker() {
 }
 
 function protectionDeriskStateText() {
+  if (state.readOnlyPreview) return PROTECTION_READ_ONLY_REASON;
   const d = state.protectionDerisk;
   if (d.busy === "preview") return "Previewing each leg; no orders placed";
   if (d.busy === "submit") return "Submitting the basket; fresh broker WhatIf per leg";
@@ -408,7 +414,8 @@ function renderProtectionDeriskBasket() {
     const remaining = deriskPreviewRemainingMs();
     if (remaining !== null) submitLabel += ` · ${Math.ceil(remaining / 1000)}s`;
     submit.textContent = submitLabel;
-    submit.disabled = d.busy !== "";
+    submit.disabled = state.readOnlyPreview || d.busy !== "";
+    submit.title = state.readOnlyPreview ? PROTECTION_READ_ONLY_REASON : "";
     submit.addEventListener("click", submitProtectionDerisk);
     children.push(submit);
   }
@@ -475,6 +482,7 @@ function deriskRequestRef() {
 }
 
 async function previewProtectionDerisk() {
+  if (state.readOnlyPreview) return;
   const d = state.protectionDerisk;
   d.busy = "preview";
   d.result = null;
@@ -529,6 +537,7 @@ function cancelProtectionDerisk() {
 }
 
 async function submitProtectionDerisk() {
+  if (state.readOnlyPreview) return;
   const d = state.protectionDerisk;
   if (!d.result || (d.result.eligible_count || 0) === 0) return;
   // Belt-and-braces against stale DOM: the Submit button is withdrawn at
@@ -873,7 +882,8 @@ function protectionRow(proposal) {
   ignore.type = "button";
   ignore.className = "protection-ignore";
   ignore.textContent = "Ignore";
-  ignore.title = "Ignore this proposal; no market order is sent";
+  ignore.disabled = state.readOnlyPreview;
+  ignore.title = state.readOnlyPreview ? PROTECTION_READ_ONLY_REASON : "Ignore this proposal; no market order is sent";
   ignore.addEventListener("click", () => ignoreProtectionProposal(proposal));
   actions.append(ignore);
   row.append(copy, actions);
@@ -910,6 +920,7 @@ function protectionFinalSubmitLabel(proposal = {}) {
 }
 
 function protectionButtonTitle(proposal = {}, gate = {}) {
+  if (state.readOnlyPreview) return PROTECTION_READ_ONLY_REASON;
   if (gate.blocked) return protectionBlockerText(proposal);
   if (gate.previewBusy) return "Broker WhatIf preview is running; no order has been placed";
   if (!gate.tradability?.ready) return gate.tradability?.reason || "Protection action is unavailable";
@@ -1679,6 +1690,7 @@ function protectionContractLabel(contract = {}) {
 }
 
 function protectionPreviewGate(proposal = {}) {
+  if (state.readOnlyPreview) return { ready: false, reason: PROTECTION_READ_ONLY_REASON };
   const trading = state.snapshot?.trading || {};
   const blocker = protectionEffectiveBlockers(proposal, state.snapshot?.market_events || {})[0];
   if (blocker) return { ready: false, reason: blockerText(blocker) };
@@ -1687,6 +1699,7 @@ function protectionPreviewGate(proposal = {}) {
 }
 
 function protectionSubmitGate(proposal = {}) {
+  if (state.readOnlyPreview) return { ready: false, reason: PROTECTION_READ_ONLY_REASON };
   const trading = state.snapshot?.trading || {};
   const blocker = protectionEffectiveBlockers(proposal, state.snapshot?.market_events || {})[0];
   if (blocker) return { ready: false, reason: blockerText(blocker) };
@@ -1703,6 +1716,7 @@ function protectionSubmitGate(proposal = {}) {
 }
 
 function protectionPreviewSubmitGate(proposal = {}, previewResult = null) {
+  if (state.readOnlyPreview) return { ready: false, reason: PROTECTION_READ_ONLY_REASON };
   if (!previewResult) return { ready: false, reason: "Run preview first" };
   if (previewResult.pending) return { ready: false, reason: "Broker WhatIf preview is still running" };
   const blocker = (previewResult.blockers || [])[0];
@@ -1824,6 +1838,7 @@ function protectionSubmitResultText(result = {}) {
 }
 
 function protectionSubmitButtonTitle({ blocked = false, previewBusy = false, submitBusy = false, gate = {} } = {}) {
+  if (state.readOnlyPreview) return PROTECTION_READ_ONLY_REASON;
   if (blocked) return "Proposal is blocked";
   if (previewBusy) return "Broker WhatIf preview is still running";
   if (submitBusy) return "Submitting stop order";
@@ -1913,6 +1928,7 @@ function formatExpiry(value) {
 }
 
 async function submitProtectionProposal(proposal) {
+  if (state.readOnlyPreview) return;
   const previewKey = protectionPreviewStateKey(proposal);
   const previewResult = state.protectionPreviews[previewKey] || null;
   const gate = protectionUsesPreviewFlow(proposal) ? protectionPreviewSubmitGate(proposal, previewResult) : protectionSubmitGate(proposal);
@@ -1978,6 +1994,7 @@ async function submitProtectionProposal(proposal) {
 }
 
 async function previewProtectionProposal(proposal) {
+  if (state.readOnlyPreview) return;
   const previewKey = protectionPreviewStateKey(proposal);
   const previewQuantity = protectionEffectiveQuantity(proposal);
   state.protectionPreviewBusy = previewKey;
@@ -2030,6 +2047,7 @@ function protectionPreviewTimeoutMs(proposal = {}) {
 }
 
 async function ignoreProtectionProposal(proposal) {
+  if (state.readOnlyPreview) return;
   const res = await fetch("/api/proposals/ignore", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -2041,6 +2059,7 @@ async function ignoreProtectionProposal(proposal) {
 }
 
 async function refreshProtectionProposals() {
+  if (state.readOnlyPreview) return syncProtectionSnapshot();
   const res = await fetch("/api/proposals/refresh", { method: "POST", credentials: "include" });
   if (res.ok) {
     const proposals = await res.json();
