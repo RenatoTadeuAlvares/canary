@@ -741,6 +741,7 @@ async function runRound4SyntheticSmoke() {
     if (desktopLayout.viewport_width !== 1280 || !desktopLayout.active || desktopLayout.nav_buttons !== 5 || !desktopLayout.account_masked || desktopLayout.horizontal_overflow) {
       throw new Error(`synthetic desktop layout failed: ${JSON.stringify(desktopLayout)}`);
     }
+    const protectionUI = await exerciseProtectionDisclosure(page, bootstrap);
     await page.setViewportSize({ width: 390, height: 844 });
     const mutationPaths = mutationRequests.map(({ method, path }) => `${method} ${path}`);
     if (JSON.stringify(mutationPaths) !== JSON.stringify(["POST /api/pairing/complete", "POST /api/alerts/attention/read", "POST /api/strategies/preview"]) || JSON.parse(mutationRequests[1].body).through_seq !== 4) throw new Error(`unexpected synthetic mutations: ${JSON.stringify(mutationRequests)}`);
@@ -806,7 +807,7 @@ async function runRound4SyntheticSmoke() {
     }
     if (externalRequests.length > 0) throw new Error(`synthetic browser attempted external requests: ${JSON.stringify(externalRequests)}`);
     if (errors.length > 0) throw new Error(`synthetic browser errors: ${errors.join("\n")}`);
-    console.log(JSON.stringify({ ok: true, browser: browserName, mobile: true, isolated: true, synthetic_only: true, external_requests: 0, pairing: { expired_fallback: true, fresh_pairing: true, attempts: pairingAttempts }, monitor, rules: rulesCard, update, brief: briefView, alerts: alertsView, edge: edgeView, orders: ordersView, strategies: { grouped: strategyBefore, preview: strategyAfter, submit_clicked: false }, desktop_layout: desktopLayout, settings, reload, auth_recovery: { device_cookie: true, session_reissued: true }, bootstrap_requests: bootstrapRequests, intercepted_mutations: mutationRequests.map(({ method, path }) => ({ method, path })) }, null, 2));
+    console.log(JSON.stringify({ ok: true, browser: browserName, mobile: true, isolated: true, synthetic_only: true, external_requests: 0, pairing: { expired_fallback: true, fresh_pairing: true, attempts: pairingAttempts }, monitor, rules: rulesCard, update, brief: briefView, alerts: alertsView, edge: edgeView, orders: ordersView, strategies: { grouped: strategyBefore, preview: strategyAfter, submit_clicked: false }, desktop_layout: desktopLayout, protection: protectionUI, settings, reload, auth_recovery: { device_cookie: true, session_reissued: true }, bootstrap_requests: bootstrapRequests, intercepted_mutations: mutationRequests.map(({ method, path }) => ({ method, path })) }, null, 2));
   } finally {
     await browser.close();
   }
@@ -1847,15 +1848,14 @@ async function exerciseSheetLayer(page) {
   }, { timeout: 5000 });
   const protectionSheet = await page.evaluate(() => ({
     title: document.getElementById("protectionSheetTitle")?.textContent?.trim() || "",
-    // The trim control keeps its own hidden gate (it needs reduce-eligible
-    // that it is offered on this account.
-    deriskSeated: Boolean(document.querySelector("#protectionSheet #protectionDerisk")),
-    previewSeated: Boolean(document.querySelector("#protectionSheet #protectionDeriskPreview")),
+    trimRoute: Boolean(document.querySelector("#protectionSheet #protectionTrimRoute")),
+    deriskSeated: Boolean(document.querySelector("#portfolioTrimSheet #protectionDerisk")),
+    previewSeated: Boolean(document.querySelector("#portfolioTrimSheet #protectionDeriskPreview")),
     rowsSeated: Boolean(document.querySelector("#protectionSheet #protectionRows")),
     opportunitiesSeated: Boolean(document.querySelector("#protectionSheet #opportunitiesPanel")),
-    submitButtons: document.querySelectorAll("#protectionSheet #protectionDeriskSubmit").length,
+    submitButtons: document.querySelectorAll("#portfolioTrimSheet .protection-derisk__submit").length,
   }));
-  for (const key of ["deriskSeated", "previewSeated", "rowsSeated", "opportunitiesSeated"]) {
+  for (const key of ["trimRoute", "deriskSeated", "previewSeated", "rowsSeated", "opportunitiesSeated"]) {
     if (!protectionSheet[key]) {
       throw new Error(`Protection sheet is missing a reseated surface (${key}): ${JSON.stringify(protectionSheet)}`);
     }
@@ -2112,8 +2112,8 @@ async function exercisePortfolioDetail(page) {
   return { opens: true, summary, rows: detail.rows, delta: hero.delta };
 }
 
-async function exerciseProtectionRiskRendering(page) {
-  await page.evaluate(() => {
+async function exerciseProtectionRiskRendering(page, bootstrap = null) {
+  const fixture = await page.evaluate(() => {
     const positionsCoverage = {
       status: "review",
       counts: { unprotected: 1, orphaned_order: 1 },
@@ -2182,10 +2182,12 @@ async function exerciseProtectionRiskRendering(page) {
     if (!apply) {
       throw new Error("smoke snapshot patch hook is unavailable");
     }
-    apply({
+    const patch = {
       account: { base_currency: "USD" },
       positions: {
-        portfolio: { base_currency: "USD" },
+        authority: { availability: "available", freshness: "current", scope: { account_id: "SYNTHETIC-PAPER", account_mode: "paper" } },
+        stocks: [{ symbol: "SMOKE", con_id: 9000, quantity: 10 }],
+        portfolio: { base_currency: "USD", dollar_delta_base: 1000 },
         protection_coverage: positionsCoverage,
       },
       stress: {
@@ -2194,6 +2196,7 @@ async function exerciseProtectionRiskRendering(page) {
         protection_coverage: stressCoverage,
       },
       proposals: {
+        account_id: "SYNTHETIC-PAPER", account_mode: "paper",
         as_of: new Date().toISOString(),
         counts: { total: 3, actionable: 3, trailing_stop: 2, option_loss_exit: 1 },
         proposals: [{
@@ -2210,8 +2213,9 @@ async function exerciseProtectionRiskRendering(page) {
           position_effect: "close",
           order_type: "TRAIL",
           tif: "GTC",
-          contract: { symbol: "SMOKE", sec_type: "STK", currency: "USD" },
+          contract: { con_id: 9000, symbol: "SMOKE", sec_type: "STK", currency: "USD" },
           trail: { trailing_percent: 10, initial_stop_price: 90 },
+          trail_sizing: { chosen_pct: 10, fallback: true, policy_min_pct: 2, policy_max_pct: 15 },
           execution_semantics: {
             reference_side: "bid",
             trigger_method_label: "last",
@@ -2290,8 +2294,15 @@ async function exerciseProtectionRiskRendering(page) {
           execution_semantics: { reference_side: "bid", trigger_method_label: "broker default", trigger_effect: "limit_order_when_triggered", price_guarantee: "stop_limit_can_leave_position_unfilled" },
         }],
       },
-    }, { protectionOpen: true, portfolioDetailOpen: true, stressDetailOpen: true });
+    };
+    apply(patch, { protectionOpen: true, portfolioDetailOpen: true, stressDetailOpen: true });
+    return patch;
   });
+  // Keep the synthetic GET bootstrap coherent with the rendered fixture when
+  // the production fallback poll refreshes during this interaction check.
+  if (bootstrap) {
+    for (const [key, value] of Object.entries(fixture)) bootstrap.snapshot[key] = { ...bootstrap.snapshot[key], ...value };
+  }
   await page.waitForFunction(() => {
     const portfolio = document.getElementById("portfolioDetailList")?.textContent?.toLowerCase() || "";
     const stress = document.getElementById("stressDetailGrid")?.textContent?.toLowerCase() || "";
@@ -2355,6 +2366,75 @@ async function exerciseProtectionRiskRendering(page) {
     throw new Error(`Stress detail does not include protection coverage context: ${JSON.stringify(info.stressDetail)}`);
   }
   return info;
+}
+
+// Fully intercepted fixtures only: disclosure and navigation exercise no
+// broker actions. Render the production DOM at phone and desktop widths.
+async function exerciseProtectionDisclosure(page, bootstrap) {
+  await exerciseProtectionRiskRendering(page, bootstrap);
+  await page.locator("#protectionTile").click();
+  const readLayout = () => page.evaluate(() => {
+    const sheet = document.getElementById("protectionSheet");
+    const row = sheet.querySelector(".protection-row");
+    const close = document.getElementById("protectionSheetClose");
+    return {
+      width: innerWidth,
+      rows: sheet.querySelectorAll(".protection-row").length,
+      review_open: row.open,
+      duplicate_repair: [...sheet.querySelectorAll(".protection-repair__copy b")].some((el) => el.textContent === "SMOKE"),
+      staged_unprotected: row.querySelector("summary").textContent.includes("No working stop · Proposal staged"),
+      fallback_visible: Boolean(row.querySelector("summary .protection-row__fallback")),
+      close_width: close.getBoundingClientRect().width,
+      close_height: close.getBoundingClientRect().height,
+      repair_targets_sized: [...sheet.querySelectorAll(".protection-repair__request")].every((el) => el.getBoundingClientRect().height >= 44),
+      horizontal_overflow: sheet.scrollWidth > sheet.clientWidth || document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      trim_in_own_sheet: Boolean(document.querySelector("#portfolioTrimSheet #protectionDerisk")),
+    };
+  });
+  const layouts = [];
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    const layout = await readLayout();
+    if (layout.rows !== 3 || layout.review_open || layout.duplicate_repair || !layout.staged_unprotected || !layout.fallback_visible || layout.close_width < 44 || layout.close_height < 44 || !layout.repair_targets_sized || layout.horizontal_overflow || !layout.trim_in_own_sheet) {
+      throw new Error(`Protection overview failed: ${JSON.stringify(layout)}`);
+    }
+    layouts.push(layout);
+    if (args["protection-screenshot"]) await page.locator("#protectionSheet").screenshot({ path: `${args["protection-screenshot"]}-${width}.png` });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator(".protection-row__summary").first().click();
+  const review = page.locator(".protection-row").first();
+  await review.locator(".protection-review__execution").waitFor({ state: "visible" });
+  await review.locator(".protection-preview").waitFor({ state: "visible" });
+  const before = await review.evaluate((row) => ({
+    execution: row.querySelector(".protection-review__execution").textContent,
+    calculation_hidden: !row.querySelector(".protection-row__calculations").open,
+    comparison_is_table: row.querySelector(".protection-row__ladder").tagName === "TABLE",
+    action_sizes: [...row.querySelectorAll(".protection-row__actions button")].map((button) => ({ width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height })),
+  }));
+  if (!before.execution.includes("fill price can differ") || !before.calculation_hidden || !before.comparison_is_table || before.action_sizes.some((size) => size.width < 44 || size.height < 44)) {
+    throw new Error(`Protection review lost decision evidence or touch targets: ${JSON.stringify(before)}`);
+  }
+  if (args["protection-screenshot"]) await page.locator("#protectionSheet").screenshot({ path: `${args["protection-screenshot"]}-review.png` });
+  await review.locator(".protection-row__calculations > summary").click();
+  await review.locator(".protection-row__calculations > summary").focus();
+  await page.evaluate(() => globalThis.__canarySmoke.applySnapshotPatch({}));
+  const retained = await page.evaluate(() => {
+    const row = document.querySelector(".protection-row");
+    return row.open && row.querySelector(".protection-row__calculations").open && document.activeElement === row.querySelector(".protection-row__calculations > summary");
+  });
+  if (!retained) throw new Error("Protection lost disclosure or keyboard focus during snapshot refresh");
+  await page.locator("#protectionTrimRoute").click();
+  await page.waitForFunction(() => document.getElementById("portfolioTrimSheet")?.open && !document.getElementById("protectionSheet")?.open);
+  const trimControl = await page.locator("#protectionDeriskPercent").evaluate((el) => ({ height: el.getBoundingClientRect().height, disabled: el.disabled }));
+  if (trimControl.height < 44 || trimControl.disabled) throw new Error(`Trim percentage must remain usable for the eligible fixture: ${JSON.stringify(trimControl)}`);
+  if (await page.locator("#portfolioTrimSheet .protection-derisk__submit").count()) throw new Error("Opening portfolio trim must not expose Submit before a basket preview");
+  if (args["protection-screenshot"]) await page.locator("#portfolioTrimSheet").screenshot({ path: `${args["protection-screenshot"]}-trim.png` });
+  await page.locator("#portfolioTrimSheetClose").click();
+  await page.locator("#protectionTile").click();
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.getElementById("protectionSheet")?.open);
+  return { layouts, execution_warning_visible: true, comparison_is_table: true, disclosure_and_focus_retained: retained, trim_separate: true, broker_actions_clicked: false };
 }
 
 // Alerts is the current annunciator log. Terminal delivery evidence stays

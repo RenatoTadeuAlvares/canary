@@ -65,6 +65,7 @@ function reset() {
     pairingRequired: false, connectionOK: false, connectionText: "Connecting", eventSource: null,
     readOnlyPreview: false, updateStatus: null, updatePollTimer: null, updateCompleteTimer: null,
     portfolioDetailOpen: false, protectionOpen: false, protectionQtyOverrides: {}, protectionQuoteTicks: {},
+    protectionReviewOpen: {}, protectionCalculationsOpen: {},
     protectionPreviewBusy: "", protectionPreviews: {}, protectionSubmitBusy: "", protectionSubmits: {},
     proposalMarketCalendars: {}, proposalMarketCalendarBusy: {},
     selectedUnderlying: "", positionsSort: "impact",
@@ -1287,6 +1288,7 @@ test("read-only protection explains and disables stop, repair, ignore, and portf
   state.protectionDerisk.previewedAt = Date.now();
   try {
     protection.renderProtectionPanel(state.snapshot.proposals);
+    assert.equal(dom.element("protectionReadOnlyBadge").hidden, false);
     const row = dom.element("protectionRows");
     for (const className of ["protection-preview", "protection-submit", "protection-ignore"]) {
       const [button] = byClass(row, className);
@@ -1314,6 +1316,107 @@ test("read-only protection explains and disables stop, repair, ignore, and portf
   } finally {
     protection.cancelProtectionDerisk();
   }
+});
+
+test("protection consolidates a staged stop only with current, unambiguous held-contract and account evidence", () => {
+  reset();
+  const proposal = protectionActionFixture();
+  proposal.contract.con_id = 42;
+  const positions = state.snapshot.positions;
+  positions.authority = { availability: "available", freshness: "current", scope: { account_id: "SYNTHETIC-PAPER", account_mode: "paper" } };
+  Object.assign(state.snapshot.proposals, { account_id: "SYNTHETIC-PAPER", account_mode: "paper" });
+  const row = positions.protection_coverage.by_underlying[0];
+  assert.equal(protection.protectionRepairProposal(row), proposal);
+  protection.renderProtectionPanel(state.snapshot.proposals);
+  assert.equal(dom.element("protectionCoverageRepair").hidden, true);
+  assert.match(byClass(dom.element("protectionRows"), "protection-row__status")[0].textContent, /No working stop · Proposal staged/);
+
+  for (const [field, value] of [["account_id", "SYNTHETIC-OTHER"], ["account_mode", "live"]]) {
+    const saved = state.snapshot.proposals[field];
+    state.snapshot.proposals[field] = value;
+    assert.equal(protection.protectionRepairProposal(row), null, "cross-account evidence must not collapse a coverage row");
+    state.snapshot.proposals[field] = saved;
+  }
+  positions.authority.freshness = "stale";
+  assert.equal(protection.protectionRepairProposal(row), null);
+  positions.authority.freshness = "current";
+  positions.stocks.push({ symbol: "SYN", con_id: 43, quantity: 1 });
+  assert.equal(protection.protectionRepairProposal(row), null, "symbol ambiguity must remain visible");
+  positions.stocks.pop();
+  proposal.contract.con_id = 43;
+  assert.equal(protection.protectionRepairProposal(row), null);
+  proposal.contract.con_id = 42;
+  proposal.contract.sec_type = "OPT";
+  assert.equal(protection.protectionRepairProposal(row), null, "an option stop cannot repair stock coverage");
+  protection.renderProtectionCoverageRepair();
+  assert.equal(dom.element("protectionCoverageRepair").hidden, false);
+
+  // Consolidated rows must not consume the visible repair limit and hide the
+  // next holding that still needs a proposal.
+  const staged = Array.from({ length: 6 }, (_, index) => ({
+    ...proposal, key: `staged-${index}`, symbol: `SYN${index}`,
+    contract: { con_id: index + 1, sec_type: "STK", currency: "USD" },
+  }));
+  state.snapshot.proposals.proposals = staged;
+  positions.stocks = staged.map((p) => ({ symbol: p.symbol, con_id: p.contract.con_id, quantity: 1 }));
+  positions.protection_coverage.by_underlying = [
+    ...staged.map((p) => ({ underlying: p.symbol, state: "unprotected" })),
+    { underlying: "NEEDS", state: "unprotected" },
+  ];
+  protection.renderProtectionCoverageRepair();
+  assert.match(dom.element("protectionCoverageRepair").textContent, /NEEDS/);
+  assert.equal(byClass(dom.element("protectionCoverageRepair"), "protection-repair__row").length, 1);
+});
+
+test("stop review disclosure retains execution risk and fallback evidence without requesting a broker preview", () => {
+  reset();
+  const proposal = protectionActionFixture();
+  Object.assign(proposal, {
+    tif: "GTC", trail: { initial_stop_price: 90, trailing_percent: 10 },
+    trail_sizing: { chosen_pct: 10, selected_by: "policy_default", fallback: true },
+    execution_semantics: { reference_side: "bid", trigger_method_label: "last", price_guarantee: "stop_price_is_not_execution_price" },
+    stop_risk: { estimated_loss_base: 20, base_currency: "EUR", gap_scenario: { gap_pct: 5, estimated_loss_base: 30 } },
+    stop_ladder: [{ kind: "fixed_5pct", stop_price: 95, estimated_loss_base: 10 }, { kind: "policy_chosen", stop_price: 90, estimated_loss_base: 20 }],
+  });
+  const requests = [];
+  globalThis.fetch = async (...args) => { requests.push(args); return response({}); };
+  const review = protection.protectionRow(proposal);
+  assert.equal(review.tagName, "DETAILS");
+  assert.equal(review.open, false);
+  assert.match(byClass(review, "protection-row__summary")[0].textContent, /Stop 90.00 USD/);
+  assert.match(byClass(review, "protection-row__summary")[0].textContent, /Fallback trail/);
+  const details = byClass(review, "protection-row__review")[0];
+  assert.match(byClass(details, "protection-review__execution")[0].textContent, /Trigger: bid \/ last.*fill price can differ/);
+  assert.match(byClass(details, "protection-review__facts")[0].textContent, /Estimated loss at stop.*€20.*5.0% gap.*€30/);
+  const calculations = byClass(details, "protection-row__calculations")[0];
+  assert.equal(calculations.open, false);
+  assert.equal(byClass(calculations, "protection-row__ladder")[0].tagName, "TABLE");
+  review.open = true;
+  review.dispatchEvent({ type: "toggle" });
+  calculations.open = true;
+  calculations.dispatchEvent({ type: "toggle" });
+  const refreshed = protection.protectionRow(proposal);
+  assert.equal(refreshed.open, true);
+  assert.equal(byClass(refreshed, "protection-row__calculations")[0].open, true);
+  assert.deepEqual(requests, [], "reading a proposal must not call the order path");
+  proposal.blockers = [{ code: "synthetic_blocker", message: "Synthetic hard blocker" }];
+  const blocked = protection.protectionRow(proposal);
+  assert.match(byClass(blocked, "protection-row__summary")[0].textContent, /Synthetic hard blocker/);
+  assert.equal(byClass(blocked, "protection-preview")[0].disabled, true);
+});
+
+test("portfolio trim opens its own sheet and keeps submission dependent on a basket preview", () => {
+  reset();
+  protectionActionFixture();
+  chrome.setProtectionSheetOpen(true);
+  assert.equal(dom.element("protectionSheet").open, true);
+  chrome.setPortfolioTrimSheetOpen(true);
+  assert.equal(dom.element("protectionSheet").open, false);
+  assert.equal(dom.element("portfolioTrimSheet").open, true);
+  assert.equal(byClass(dom.element("protectionDeriskBasket"), "protection-derisk__submit").length, 0);
+  chrome.setProtectionSheetOpen(true);
+  assert.equal(dom.element("portfolioTrimSheet").open, false);
+  assert.equal(dom.element("protectionSheet").open, true);
 });
 
 test("protection handlers reject stale action controls after switching to read-only and keep snapshot reads available", async () => {

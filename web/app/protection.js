@@ -12,13 +12,12 @@ const PROTECTION_READ_ONLY_REASON = "Read-only preview. Use your paired Canary a
 function renderProtectionPanel(proposals = {}, autoTrade = {}, marketEvents = state.snapshot?.market_events || {}) {
   const panel = $("protectionPanel");
   const detail = $("protectionDetailPanel");
-  const toggle = $("protectionToggle");
   const rows = proposals.proposals || [];
+  const visibleRows = protectionVisibleRows(rows, marketEvents);
   const counts = proposals.counts || {};
   panel.dataset.open = String(state.protectionOpen);
   detail.hidden = !state.protectionOpen;
-  toggle.textContent = state.protectionOpen ? "Hide proposals" : "Show proposals";
-  toggle.setAttribute("aria-expanded", String(state.protectionOpen));
+  $("protectionReadOnlyBadge").hidden = !state.readOnlyPreview;
   renderProtectionTimestamp(proposals);
   const theta = protectionThetaSummary(proposals, rows);
   const thetaEl = $("protectionTheta");
@@ -35,19 +34,28 @@ function renderProtectionPanel(proposals = {}, autoTrade = {}, marketEvents = st
   noStopEl.textContent = noStop.text;
   noStopEl.title = noStop.title;
   setMetricTone(noStopEl, noStop.risk ? "alert" : "neutral");
-  // Sits above the proposals fold: it explains a row deliberately left out of
-  // the metric, so it must be readable without expanding anything.
+  const unavailable = [];
+  if (!hasNumericValue(theta.value)) unavailable.push("Theta");
+  if (riskExcess.text === "--") unavailable.push("risk excess");
+  $("protectionInputNotice").textContent = unavailable.length ? `${unavailable.join(" and ")} unavailable` : "";
   const defunctEl = $("protectionDataNote");
   const defunctNote = protectionNotProtectableText(currentProtectionCoverage());
-  defunctEl.textContent = defunctNote;
+  const excluded = (currentProtectionCoverage()?.by_underlying || []).filter((row) => row.state === "not_protectable").length;
+  $("protectionDataNoteSummary").textContent = `${excluded} ${excluded === 1 ? "position excluded" : "positions excluded"} from coverage`;
+  $("protectionDataNoteDetail").textContent = defunctNote;
   defunctEl.hidden = !defunctNote;
-  $("protectionActions").textContent = String(counts.actionable ?? rows.length ?? 0);
+  const coverage = currentProtectionCoverage();
+  const coverageNotice = $("protectionCoverageNotice");
+  const needsReconciliation = (coverage?.orphaned_orders || []).length + (coverage?.reconcile_required_orders || []).length
+    + Number(coverage?.counts?.orphaned_order || 0) + Number(coverage?.counts?.reconcile_required || 0) > 0;
+  coverageNotice.textContent = coverage?.status === "unknown" || Number(coverage?.counts?.unknown || 0) > 0
+    ? "Coverage is incomplete. Some positions have unknown protection."
+    : needsReconciliation ? "Protective orders need reconciliation. Coverage may be incomplete." : "";
+  coverageNotice.hidden = !coverageNotice.textContent;
+  $("protectionActions").textContent = String(visibleRows.length);
   renderProtectionTile(proposals, rows, theta);
   renderProtectionExposure();
   renderMarketFlagRail("protectionFlagRail", protectionHeroMarketFlags(rows, marketEvents));
-  const autoButton = $("protectionAutoButton");
-  autoButton.disabled = true;
-  autoButton.title = "Manual confirmation required";
   const reason = protectionReason(proposals, autoTrade);
   const reasonEl = $("protectionReason");
   const refreshReason = protectionSnapshotRefreshReason();
@@ -55,14 +63,28 @@ function renderProtectionPanel(proposals = {}, autoTrade = {}, marketEvents = st
   const reasonText = [reason, hiddenReason, refreshReason].filter(Boolean).join(" · ");
   reasonEl.textContent = reasonText;
   reasonEl.hidden = !reasonText;
-  // The de-risk control lives in the always-visible header, so it renders
+  // The independent trim sheet shares the snapshot and existing action gates.
   renderProtectionDerisk();
   if (!state.protectionOpen) return;
   renderProtectionCoverageRepair();
-  const visibleRows = protectionVisibleRows(rows, marketEvents);
-  $("protectionRows").replaceChildren(...(visibleRows.length > 0
+  const grid = $("protectionRows");
+  const focused = grid.contains?.(document.activeElement) ? document.activeElement : null;
+  const focusedRow = focused?.closest?.("[data-protection-key]");
+  const focusKey = focused?.dataset.protectionFocus;
+  // Native details state changes before its asynchronous toggle event. Capture
+  // it here as well so a quote refresh cannot collapse a review mid-gesture.
+  for (const row of grid.querySelectorAll?.("[data-protection-key]") || []) {
+    state.protectionReviewOpen[row.dataset.protectionKey] = row.open;
+    state.protectionCalculationsOpen[row.dataset.protectionKey] = Boolean(row.querySelector(".protection-row__calculations")?.open);
+  }
+  grid.replaceChildren(...(visibleRows.length > 0
     ? visibleRows.map(protectionRow)
     : [protectionEmptyRow("No protection proposals requiring action.")]));
+  if (focusKey) {
+    const replacement = Array.from(grid.querySelectorAll("[data-protection-key]")).find((row) => row.dataset.protectionKey === focusedRow.dataset.protectionKey);
+    const target = Array.from(replacement?.querySelectorAll("[data-protection-focus]") || []).find((el) => el.dataset.protectionFocus === focusKey);
+    (target && !target.disabled ? target : replacement?.querySelector("summary"))?.focus({ preventScroll: true });
+  }
   if (protectionNeedsSnapshotSync(proposals, autoTrade)) {
     queueProtectionSnapshotSync();
   }
@@ -105,7 +127,7 @@ function renderProtectionTile(proposals = {}, rows = [], theta = {}) {
 function renderProtectionCoverageRepair() {
   const box = $("protectionCoverageRepair");
   if (!box) return;
-  const rows = protectionRepairRows(currentProtectionCoverage());
+  const rows = protectionRepairRows(currentProtectionCoverage()).filter((row) => !protectionRepairProposal(row)).slice(0, 6);
   if (rows.length === 0) {
     box.hidden = true;
     box.replaceChildren();
@@ -114,7 +136,7 @@ function renderProtectionCoverageRepair() {
   box.hidden = false;
   const heading = document.createElement("p");
   heading.className = "protection-repair__label";
-  heading.textContent = "Uncovered positions";
+  heading.textContent = "Needs a stop proposal";
   heading.title = "Stock/ETF quantity with no matching open broker stop, from the protection coverage ledger.";
   const trading = state.snapshot?.trading || {};
   box.replaceChildren(heading, ...rows.map((row) => protectionRepairRow(row, trading)));
@@ -125,8 +147,29 @@ function renderProtectionCoverageRepair() {
 // reconciliation, not another stop, and defunct rows have no mark to stop.
 function protectionRepairRows(coverage = null) {
   return (coverage?.by_underlying || [])
-    .filter((row) => ["unprotected", "partial"].includes(String(row.state || "").toLowerCase()))
-    .slice(0, 6);
+    .filter((row) => ["unprotected", "partial"].includes(String(row.state || "").toLowerCase()));
+}
+
+// A coverage row has only an underlying label. Join through a unique current
+// stock ConID and matching account scope; never merge solely by symbol.
+function protectionRepairProposal(row = {}) {
+  const positions = state.snapshot?.positions || {};
+  const proposals = state.snapshot?.proposals || {};
+  const authority = positions.authority || {};
+  const scope = authority.scope || {};
+  if (authority.availability !== "available" || authority.freshness !== "current") return null;
+  if (!scope.account_id || !scope.account_mode || scope.account_id !== proposals.account_id || scope.account_mode !== proposals.account_mode) return null;
+  const conID = protectionRepairConID(normalizeSymbol(row.underlying || row.symbol || ""));
+  if (!conID) return null;
+  const matches = protectionVisibleRows(proposals.proposals || [], state.snapshot?.market_events || {}).filter((proposal) =>
+    proposal.bucket === "trailing_stop" && !proposal.option_exit &&
+    String(proposal.contract?.sec_type || proposal.sec_type || "").toUpperCase() === "STK" &&
+    Number(proposal.contract?.con_id || 0) === conID);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function protectionProposalCoverage(proposal = {}) {
+  return protectionRepairRows(currentProtectionCoverage()).find((row) => protectionRepairProposal(row)?.key === proposal.key) || null;
 }
 
 function protectionRepairRow(row = {}, trading = {}) {
@@ -145,7 +188,7 @@ function protectionRepairRow(row = {}, trading = {}) {
   copy.append(name, meta);
   const request = document.createElement("button");
   request.type = "button";
-  request.className = "protection-preview protection-repair__request";
+  request.className = "app-button app-button--primary protection-preview protection-repair__request";
   const busy = state.protectionStopRequestBusy === symbol;
   request.textContent = busy ? "Requesting" : "Request stop";
   const gate = protectionStopRequestGate(trading);
@@ -262,9 +305,8 @@ function reduceIsOption(row = {}) {
 }
 
 
-// renderProtectionDerisk draws the always-visible header "Trim delta-adjusted
-// risk" control: a percentage + a Preview button, plus the basket once
-// is display only.
+// The independent trim sheet uses the existing percentage, basket, and daemon
+// action gates. Opening or closing it does not create or submit a preview.
 function renderProtectionDerisk() {
   syncDeriskValidityTicker();
   const section = $("protectionDerisk");
@@ -409,7 +451,7 @@ function renderProtectionDeriskBasket() {
     const submit = document.createElement("button");
     submit.type = "button";
     submit.id = "protectionDeriskSubmit";
-    submit.className = "protection-submit protection-derisk__submit";
+    submit.className = "app-button app-button--primary protection-submit protection-derisk__submit";
     let submitLabel = `Submit ${res.eligible_count} order${res.eligible_count === 1 ? "" : "s"}`;
     const remaining = deriskPreviewRemainingMs();
     if (remaining !== null) submitLabel += ` · ${Math.ceil(remaining / 1000)}s`;
@@ -761,133 +803,195 @@ async function syncProtectionSnapshot() {
   }
 }
 
-// A staged proposal is an order bar: the Orders-screen tile shape, with an
-// that the daemon did not publish.
+// Opening a review is local disclosure only. Broker preview remains an
+// explicit button inside the review, with the existing preview/submit gates.
 function protectionRow(proposal) {
-  const row = document.createElement("div");
   const marketEvents = state.snapshot?.market_events || {};
   const effectiveBlockers = protectionEffectiveBlockers(proposal, marketEvents);
   const blocked = effectiveBlockers.length > 0;
-  // Lamp only. The gating below reads `blocked` exactly as it always did;
-  // the bar mirrors that and never lamps a proposal the daemon parked.
-  const stateBlocked = String(proposal.state || "").toLowerCase() === "blocked";
-  row.className = "protection-row pd-tile pd-order" + (blocked || stateBlocked ? "" : " pd-tile--watch");
-  const bar = document.createElement("span");
-  bar.className = "pd-tile__bar";
-  bar.setAttribute("aria-hidden", "true");
-  row.append(bar);
-  const previewFlow = protectionUsesPreviewFlow(proposal);
-  const tradability = previewFlow ? protectionPreviewGate(proposal) : protectionSubmitGate(proposal);
   const previewKey = protectionPreviewStateKey(proposal);
   const previewBusy = state.protectionPreviewBusy === previewKey;
-  const previewResult = state.protectionPreviews[previewKey] || null;
-  const finalSubmitGate = previewFlow ? protectionPreviewSubmitGate(proposal, previewResult) : null;
   const submitBusy = state.protectionSubmitBusy === previewKey;
+  const previewResult = state.protectionPreviews[previewKey] || null;
   const submitResult = state.protectionSubmits[previewKey] || null;
-  const copy = document.createElement("div");
-  copy.className = "protection-row__copy";
-  const bucket = document.createElement("span");
-  bucket.className = "protection-row__bucket pd-tile__legend";
-  // Identity plate, in the Orders register: instrument, the daemon's own
-  // it was staged under.
-  bucket.textContent = [proposal.symbol || "--", protectionActionLabel(proposal), protectionBucketLabel(proposal)].filter(Boolean).join(" · ");
+  const tradability = protectionPreviewGate(proposal);
+  const finalSubmitGate = protectionPreviewSubmitGate(proposal, previewResult);
+  const row = document.createElement("details");
+  row.className = "protection-row protection-proposal";
+  row.dataset.protectionKey = previewKey;
+  row.open = Boolean(state.protectionReviewOpen[previewKey]);
+  row.addEventListener("toggle", () => {
+    if (row.isConnected === false) return;
+    state.protectionReviewOpen[previewKey] = row.open;
+  });
+  const summary = document.createElement("summary");
+  summary.className = "protection-row__summary";
+  summary.dataset.protectionFocus = "review";
+  const identity = document.createElement("span");
+  identity.className = "protection-row__identity";
   const title = document.createElement("b");
   title.className = "protection-row__title";
   title.textContent = protectionProposalTitle(proposal);
-  copy.append(bucket, title);
-  const stepper = protectionQuantityStepper(proposal);
-  if (stepper) copy.append(stepper);
-  const quoteLine = protectionQuoteLine(proposal);
-  if (quoteLine) copy.append(quoteLine);
-  const positionLine = protectionPositionLine(proposal);
-  if (positionLine) copy.append(positionLine);
-  const metricText = protectionMetricText(proposal);
-  const riskTicket = protectionRiskTicket(proposal, metricText);
-  if (riskTicket) {
-    copy.append(riskTicket);
-    const ladder = protectionStopLadder(proposal);
-    if (ladder) copy.append(ladder);
-  } else if (metricText) {
-    const metric = document.createElement("small");
-    metric.className = "protection-row__trail";
-    if (protectionTrailSizingFallback(proposal)) {
-      metric.classList.add("protection-row__trail--fallback");
-    }
-    metric.textContent = metricText;
-    copy.append(metric);
+  const status = document.createElement("span");
+  status.className = "protection-row__status";
+  const coverage = protectionProposalCoverage(proposal);
+  const coverageText = coverage?.state === "partial" ? "Partly protected" : coverage ? "No working stop" : "";
+  const staged = blocked || proposal.state === "blocked" ? "Proposal blocked" : "Proposal staged";
+  status.textContent = [proposal.option_exit ? protectionBucketLabel(proposal) : "", coverageText, staged].filter(Boolean).join(" · ");
+  if (blocked || proposal.state === "blocked") status.classList.add("protection-row__status--blocked");
+  identity.append(title, status);
+  const metric = document.createElement("span");
+  metric.className = "protection-row__compact-metric";
+  metric.textContent = protectionCompactMetric(proposal);
+  if (metric.textContent) identity.append(metric);
+  if (protectionTrailSizingFallback(proposal)) {
+    const fallback = document.createElement("span");
+    fallback.className = "protection-row__fallback";
+    fallback.textContent = "Fallback trail";
+    identity.append(fallback);
   }
-  const blockerText = blocked ? protectionBlockerText({ ...proposal, blockers: effectiveBlockers }) : "";
-  if (blockerText) {
-    const blocker = document.createElement("small");
+  if (blocked) {
+    const blocker = document.createElement("span");
     blocker.className = "protection-row__blocker";
-    blocker.textContent = blockerText;
-    copy.append(blocker);
+    blocker.textContent = protectionBlockerText({ ...proposal, blockers: effectiveBlockers });
+    identity.append(blocker);
   }
+  const disclosure = document.createElement("span");
+  disclosure.className = "protection-row__disclosure";
+  disclosure.textContent = "Review";
+  summary.append(identity, disclosure);
+  row.append(summary);
+
+  const review = document.createElement("div");
+  review.className = "protection-row__review";
+  const quote = protectionQuoteLine(proposal);
+  if (quote) review.append(quote);
+  const stepper = protectionQuantityStepper(proposal);
+  if (stepper) review.append(stepper);
+  const risk = document.createElement("div");
+  risk.className = "protection-review__facts";
+  for (const [label, value] of [
+    ["Estimated loss at stop", protectionStopRiskLossLabel(proposal.stop_risk)],
+    [protectionStopRiskGapName(proposal.stop_risk?.gap_scenario), protectionStopRiskGapLabel(proposal.stop_risk)],
+  ]) {
+    if (!value) continue;
+    const fact = document.createElement("div");
+    const caption = document.createElement("span");
+    caption.textContent = label;
+    const figure = document.createElement("b");
+    figure.textContent = value;
+    fact.append(caption, figure);
+    risk.append(fact);
+  }
+  if (risk.childElementCount) review.append(risk);
+  const execution = document.createElement("p");
+  execution.className = "protection-review__execution";
+  execution.textContent = protectionExecutionReviewText(proposal);
+  if (execution.textContent) review.append(execution);
+  const flags = marketFlagRow(protectionDecisionFlags(proposal, marketEvents));
+  if (flags) review.append(flags);
+
+  const calculations = document.createElement("details");
+  calculations.className = "protection-disclosure protection-row__calculations";
+  calculations.open = Boolean(state.protectionCalculationsOpen[previewKey]);
+  calculations.addEventListener("toggle", () => {
+    if (calculations.isConnected === false) return;
+    state.protectionCalculationsOpen[previewKey] = calculations.open;
+  });
+  const calculationTitle = document.createElement("summary");
+  calculationTitle.textContent = "Calculation details";
+  calculationTitle.dataset.protectionFocus = "calculations";
+  calculations.append(calculationTitle);
+  const positionLine = protectionPositionLine(proposal);
+  if (positionLine) calculations.append(positionLine);
+  const metricText = protectionMetricText(proposal);
+  const ticket = protectionRiskTicket(proposal, metricText);
+  if (ticket) calculations.append(ticket);
+  else if (metricText) {
+    const metricDetail = document.createElement("p");
+    metricDetail.textContent = metricText;
+    calculations.append(metricDetail);
+  }
+  const ladder = protectionStopLadder(proposal);
+  if (ladder) calculations.append(ladder);
+  const reasonText = protectionReasonText(proposal, { metricShown: Boolean(metricText) });
+  if (reasonText) {
+    const reason = document.createElement("p");
+    reason.textContent = reasonText;
+    calculations.append(reason);
+  }
+  if (calculations.childElementCount > 1) review.append(calculations);
   const previewText = protectionPreviewText(previewResult, proposal);
   if (previewText) {
     const preview = document.createElement("small");
     preview.className = "protection-row__preview";
     preview.textContent = previewText;
-    copy.append(preview);
+    review.append(preview);
   }
-  const submitStateText = previewFlow ? protectionSubmitStateText({
-    result: submitResult,
-    gate: finalSubmitGate,
-    busy: submitBusy,
-    previewResult,
-    proposal,
-  }) : "";
-  if (submitStateText) {
-    const submitState = document.createElement("small");
-    submitState.className = protectionSubmitStateClass({ result: submitResult, gate: finalSubmitGate, busy: submitBusy });
-    submitState.textContent = submitStateText;
-    copy.append(submitState);
+  const submitText = protectionSubmitStateText({ result: submitResult, gate: finalSubmitGate, busy: submitBusy, previewResult, proposal });
+  if (submitText) {
+    const statusLine = document.createElement("small");
+    statusLine.className = protectionSubmitStateClass({ result: submitResult, gate: finalSubmitGate, busy: submitBusy });
+    statusLine.textContent = submitText;
+    review.append(statusLine);
   }
-  const reasonText = protectionReasonText(proposal, { metricShown: Boolean(metricText) });
-  if (reasonText) {
-    const reason = document.createElement("small");
-    reason.className = "protection-row__reason";
-    reason.textContent = reasonText;
-    copy.append(reason);
-  }
-  const flagRow = marketFlagRow(protectionDecisionFlags(proposal, marketEvents));
-  if (flagRow) copy.append(flagRow);
   const actions = document.createElement("div");
   actions.className = "protection-row__actions";
-  const primary = document.createElement("button");
-  primary.type = "button";
-  primary.className = previewFlow ? "protection-preview" : proposal.action === "BUY" ? "protection-buy" : "protection-sell";
-  primary.textContent = previewBusy ? "Previewing" : protectionSubmitLabel(proposal);
-  primary.disabled = blocked || previewBusy || submitBusy || !tradability.ready;
-  primary.title = protectionButtonTitle(proposal, { blocked, previewBusy, tradability });
-  primary.addEventListener("click", () => {
-    if (previewFlow) {
-      previewProtectionProposal(proposal);
-      return;
-    }
-    submitProtectionProposal(proposal);
-  });
-  actions.append(primary);
-  if (previewFlow && (submitResult || submitBusy || (previewResult && !previewResult.pending))) {
-    const finalSubmit = document.createElement("button");
-    finalSubmit.type = "button";
-    finalSubmit.className = "protection-submit";
-    finalSubmit.textContent = submitBusy ? "Submitting" : protectionFinalSubmitLabel(proposal);
-    finalSubmit.disabled = blocked || previewBusy || submitBusy || !finalSubmitGate.ready;
-    finalSubmit.title = protectionSubmitButtonTitle({ blocked, previewBusy, submitBusy, gate: finalSubmitGate });
-    finalSubmit.addEventListener("click", () => submitProtectionProposal(proposal));
-    actions.append(finalSubmit);
+  const preview = document.createElement("button");
+  preview.type = "button";
+  preview.className = `app-button app-button--${finalSubmitGate.ready ? "secondary" : "primary"} protection-preview`;
+  preview.dataset.protectionFocus = "preview";
+  preview.textContent = previewBusy ? "Previewing" : protectionSubmitLabel(proposal);
+  preview.disabled = blocked || previewBusy || submitBusy || !tradability.ready;
+  preview.title = protectionButtonTitle(proposal, { blocked, previewBusy, tradability });
+  preview.addEventListener("click", () => previewProtectionProposal(proposal));
+  actions.append(preview);
+  if (submitResult || submitBusy || (previewResult && !previewResult.pending)) {
+    const submit = document.createElement("button");
+    submit.type = "button";
+    submit.className = "app-button app-button--primary protection-submit";
+    submit.dataset.protectionFocus = "submit";
+    submit.textContent = submitBusy ? "Submitting" : protectionFinalSubmitLabel(proposal);
+    submit.disabled = blocked || previewBusy || submitBusy || !finalSubmitGate.ready;
+    submit.title = protectionSubmitButtonTitle({ blocked, previewBusy, submitBusy, gate: finalSubmitGate });
+    submit.addEventListener("click", () => submitProtectionProposal(proposal));
+    actions.append(submit);
   }
   const ignore = document.createElement("button");
   ignore.type = "button";
-  ignore.className = "protection-ignore";
+  ignore.className = "app-button app-button--quiet protection-ignore";
+  ignore.dataset.protectionFocus = "ignore";
   ignore.textContent = "Ignore";
   ignore.disabled = state.readOnlyPreview;
   ignore.title = state.readOnlyPreview ? PROTECTION_READ_ONLY_REASON : "Ignore this proposal; no market order is sent";
   ignore.addEventListener("click", () => ignoreProtectionProposal(proposal));
   actions.append(ignore);
-  row.append(copy, actions);
+  review.append(actions);
+  row.append(review);
   return row;
+}
+
+function protectionCompactMetric(proposal = {}) {
+  if (proposal.bucket !== "trailing_stop") return protectionMetricText(proposal);
+  const trail = proposal.trail || {};
+  const live = protectionLiveTrailStop(proposal, trail);
+  const stop = live?.stop ?? trail.initial_stop_price;
+  const currency = normalizeCurrency(proposal.contract?.currency);
+  return [
+    hasNumericValue(stop) ? `Stop ${numberRead(stop)}${currency ? ` ${currency}` : ""}` : "Stop unavailable",
+    hasNumericValue(proposal.trail_sizing?.chosen_pct) ? `${pct(proposal.trail_sizing.chosen_pct)} trail` : protectionTrailOffsetLabel(trail),
+    proposal.tif || "",
+  ].filter(Boolean).join(" · ");
+}
+
+function protectionExecutionReviewText(proposal = {}) {
+  const guarantee = proposal.execution_semantics?.price_guarantee;
+  const trigger = protectionExecutionTriggerLabel(proposal.execution_semantics);
+  let warning = "";
+  if (guarantee === "stop_price_is_not_execution_price") warning = "Triggers a market order. The fill price can differ from the stop; loss estimates are not a guarantee.";
+  if (guarantee === "stop_limit_can_leave_position_unfilled") warning = "Triggers a limit order. The position can remain unfilled; loss estimates are not a guarantee.";
+  if (proposal.bucket === "option_loss_exit") warning = "Day limit close. The order can remain unfilled while the loss worsens.";
+  return [trigger ? `Trigger: ${trigger}.` : "", warning].filter(Boolean).join(" ");
 }
 
 function protectionProposalTitle(proposal = {}) {
@@ -1187,19 +1291,19 @@ function protectionStopLadder(proposal = {}) {
   if (proposal.bucket !== "trailing_stop") return null;
   const steps = protectionStopLadderDisplaySteps(proposal.stop_ladder || []);
   if (steps.length === 0) return null;
-  const wrap = document.createElement("div");
+  const wrap = document.createElement("table");
   wrap.className = "protection-row__ladder";
-  wrap.setAttribute("aria-label", "Stop ladder comparison");
-  const heading = document.createElement("span");
+  const heading = document.createElement("caption");
   heading.className = "protection-row__ladder-label";
-  heading.textContent = "Stop ladder";
+  heading.textContent = "Stop ladder · price / estimated loss";
   wrap.append(heading);
   for (const step of steps) {
-    const item = document.createElement("span");
+    const item = document.createElement("tr");
     item.className = `protection-row__ladder-step protection-row__ladder-step--${protectionStopLadderStepClass(step)}`;
-    const label = document.createElement("b");
+    const label = document.createElement("th");
+    label.setAttribute("scope", "row");
     label.textContent = protectionStopLadderShortLabel(step);
-    const detail = document.createElement("span");
+    const detail = document.createElement("td");
     detail.textContent = protectionStopLadderStepDetail(step, proposal.stop_risk || {});
     item.title = protectionStopLadderStepTitle(step, proposal.stop_risk || {});
     item.append(label, detail);
@@ -1464,6 +1568,7 @@ function protectionQuantityStepper(proposal = {}) {
   const dec = document.createElement("button");
   dec.type = "button";
   dec.className = "protection-qty__step";
+  dec.dataset.protectionFocus = "decrease";
   dec.textContent = "−";
   dec.disabled = current <= 1;
   dec.setAttribute("aria-label", "Decrease sell size");
@@ -1474,6 +1579,7 @@ function protectionQuantityStepper(proposal = {}) {
   const inc = document.createElement("button");
   inc.type = "button";
   inc.className = "protection-qty__step";
+  inc.dataset.protectionFocus = "increase";
   inc.textContent = "+";
   inc.disabled = current >= max;
   inc.setAttribute("aria-label", "Increase sell size");
@@ -1492,6 +1598,7 @@ function protectionQuantityStepper(proposal = {}) {
     const reset = document.createElement("button");
     reset.type = "button";
     reset.className = "protection-qty__reset";
+    reset.dataset.protectionFocus = "reset";
     reset.textContent = `proposed ${proposed} ↺`;
     reset.title = "Reset to the proposed quantity";
     reset.addEventListener("click", () => setProtectionQuantity(proposal, proposed));
@@ -2134,4 +2241,4 @@ function queueProposalMarketCalendarSync(market = "") {
     });
 }
 
-export { DERISK_PREVIEW_VALID_MS, cancelProtectionDerisk, deriskBasketLine, deriskLegRow, deriskPreviewExpired, deriskPreviewRemainingMs, deriskRequestRef, deriskValidityTicker, formatExpiry, formatStrike, goDurationMinutes, ignoreProtectionProposal, marketCalendarMatches, nudgeProtectionQuantity, previewProtectionDerisk, previewProtectionProposal, proposalIsBuyToCover, proposalMarketKey, proposalMarketLabel, protectionActionLabel, protectionActionTitle, protectionBlockerText, protectionBucketLabel, protectionButtonTitle, protectionContractLabel, protectionDecisionFlags, protectionDeriskStateText, protectionEffectiveQuantity, protectionExecutionTriggerLabel, protectionExecutionWarningLabel, protectionFinalSubmitLabel, protectionHeroMarketFlags, protectionInferredReference, protectionLiveTrailStop, protectionLossCurrency, protectionMarketCalendar, protectionMarketStateHint, protectionMetricText, protectionNeedsSnapshotSync, protectionOptionLeg, protectionPositionLine, protectionPositionUnitLabel, protectionPreviewGate, protectionPreviewOutcomeLabel, protectionPreviewStale, protectionPreviewStateKey, protectionPreviewSubmitBlockedReason, protectionPreviewSubmitEligible, protectionPreviewSubmitGate, protectionPreviewText, protectionPreviewTimeoutMs, protectionProposalDTE, protectionProposalTitle, protectionQuantityAcceleratedStep, protectionQuantityStepDelta, protectionQuantityStepper, protectionQuoteFor, protectionQuoteFrozen, protectionQuoteLine, protectionQuoteStatusLabel, protectionQuoteTickDir, protectionReason, protectionReasonText, protectionReferenceLabel, protectionRepairConID, protectionRepairRow, protectionRepairRows, protectionRiskExcessCurrency, protectionRiskExcessSummary, protectionRiskTicket, protectionRiskTicketParts, protectionRiskTicketTitle, protectionRow, protectionSideLabel, protectionSnapshotRefreshReason, protectionStopChanged, protectionStopDraftSummary, protectionStopLadder, protectionStopLadderDisplaySteps, protectionStopLadderLabel, protectionStopLadderShortLabel, protectionStopLadderStepClass, protectionStopLadderStepDetail, protectionStopLadderStepTitle, protectionStopRequestGate, protectionStopRequestNote, protectionStopRiskGapLabel, protectionStopRiskGapName, protectionStopRiskLossLabel, protectionSubmitButtonTitle, protectionSubmitGate, protectionSubmitLabel, protectionSubmitResultText, protectionSubmitStateClass, protectionSubmitStateText, protectionThetaSummary, protectionTrailOffsetLabel, protectionTrailSizingFallback, protectionTrailSizingLabel, protectionTrailSizingRangeLabel, protectionTrailSizingSourceLabel, protectionTransientSnapshotBlocker, protectionUsesPreviewFlow, protectionWhatIfDetails, queueProposalMarketCalendarSync, queueProtectionSnapshotSync, reduceEligibleHoldings, reduceIsOption, refreshProtectionProposals, renderProtectionCoverageRepair, renderProtectionDerisk, renderProtectionDeriskBasket, renderProtectionExposure, renderProtectionPanel, renderProtectionTile, renderProtectionTimestamp, requestProtectionStop, setProtectionQuantity, submitProtectionDerisk, submitProtectionProposal, syncDeriskValidityTicker, syncProtectionSnapshot };
+export { DERISK_PREVIEW_VALID_MS, cancelProtectionDerisk, deriskBasketLine, deriskLegRow, deriskPreviewExpired, deriskPreviewRemainingMs, deriskRequestRef, deriskValidityTicker, formatExpiry, formatStrike, goDurationMinutes, ignoreProtectionProposal, marketCalendarMatches, nudgeProtectionQuantity, previewProtectionDerisk, previewProtectionProposal, proposalIsBuyToCover, proposalMarketKey, proposalMarketLabel, protectionActionLabel, protectionActionTitle, protectionCompactMetric, protectionExecutionReviewText, protectionRepairProposal, protectionProposalCoverage, protectionBlockerText, protectionBucketLabel, protectionButtonTitle, protectionContractLabel, protectionDecisionFlags, protectionDeriskStateText, protectionEffectiveQuantity, protectionExecutionTriggerLabel, protectionExecutionWarningLabel, protectionFinalSubmitLabel, protectionHeroMarketFlags, protectionInferredReference, protectionLiveTrailStop, protectionLossCurrency, protectionMarketCalendar, protectionMarketStateHint, protectionMetricText, protectionNeedsSnapshotSync, protectionOptionLeg, protectionPositionLine, protectionPositionUnitLabel, protectionPreviewGate, protectionPreviewOutcomeLabel, protectionPreviewStale, protectionPreviewStateKey, protectionPreviewSubmitBlockedReason, protectionPreviewSubmitEligible, protectionPreviewSubmitGate, protectionPreviewText, protectionPreviewTimeoutMs, protectionProposalDTE, protectionProposalTitle, protectionQuantityAcceleratedStep, protectionQuantityStepDelta, protectionQuantityStepper, protectionQuoteFor, protectionQuoteFrozen, protectionQuoteLine, protectionQuoteStatusLabel, protectionQuoteTickDir, protectionReason, protectionReasonText, protectionReferenceLabel, protectionRepairConID, protectionRepairRow, protectionRepairRows, protectionRiskExcessCurrency, protectionRiskExcessSummary, protectionRiskTicket, protectionRiskTicketParts, protectionRiskTicketTitle, protectionRow, protectionSideLabel, protectionSnapshotRefreshReason, protectionStopChanged, protectionStopDraftSummary, protectionStopLadder, protectionStopLadderDisplaySteps, protectionStopLadderLabel, protectionStopLadderShortLabel, protectionStopLadderStepClass, protectionStopLadderStepDetail, protectionStopLadderStepTitle, protectionStopRequestGate, protectionStopRequestNote, protectionStopRiskGapLabel, protectionStopRiskGapName, protectionStopRiskLossLabel, protectionSubmitButtonTitle, protectionSubmitGate, protectionSubmitLabel, protectionSubmitResultText, protectionSubmitStateClass, protectionSubmitStateText, protectionThetaSummary, protectionTrailOffsetLabel, protectionTrailSizingFallback, protectionTrailSizingLabel, protectionTrailSizingRangeLabel, protectionTrailSizingSourceLabel, protectionTransientSnapshotBlocker, protectionUsesPreviewFlow, protectionWhatIfDetails, queueProposalMarketCalendarSync, queueProtectionSnapshotSync, reduceEligibleHoldings, reduceIsOption, refreshProtectionProposals, renderProtectionCoverageRepair, renderProtectionDerisk, renderProtectionDeriskBasket, renderProtectionExposure, renderProtectionPanel, renderProtectionTile, renderProtectionTimestamp, requestProtectionStop, setProtectionQuantity, submitProtectionDerisk, submitProtectionProposal, syncDeriskValidityTicker, syncProtectionSnapshot };

@@ -4,7 +4,7 @@ import { completePairing } from "./auth.js";
 import { renderBriefCard } from "./brief.js";
 import { refreshEdge, renderEdge } from "./edge.js";
 import { renderStressDetail, renderStressStatus, renderStressTimestamp, renderMarketContext, renderRegimePanel, renderRulesCard } from "./stress.js";
-import { ensureRegimeStressExpansion, handleAccountPanelTap, handleOpportunitiesPanelTap, handlePortfolioPanelTap, handleProtectionPanelTap, renderTabs, resetViewportScroll, setAccountOverviewExpansion, setAccountValueVisible, setActiveTab, setOpportunitiesExpansion, setProtectionExpansion, setProtectionSheetOpen, setRegimeStressExpansion, setRulesSheetOpen, setupBottomTabs, syncAccountPrivacyState } from "./chrome.js";
+import { ensureRegimeStressExpansion, handleAccountPanelTap, handleOpportunitiesPanelTap, handlePortfolioPanelTap, renderTabs, resetViewportScroll, setAccountOverviewExpansion, setAccountValueVisible, setActiveTab, setOpportunitiesExpansion, setProtectionSheetOpen, setPortfolioTrimSheetOpen, setRegimeStressExpansion, setRulesSheetOpen, setupBottomTabs, syncAccountPrivacyState } from "./chrome.js";
 import { bootstrap, bootstrapWithRetry, refreshBootstrapIfSSEUnavailable, showPairing } from "./lifecycle.js";
 import { refreshOpportunities, renderOpportunitiesPanel } from "./opportunities.js";
 import { ACTIVE_ORDERS_REFRESH_MS, refreshOpenOrders, renderOpenOrders } from "./orders.js";
@@ -225,6 +225,7 @@ for (const openerID of ["moversPlacard", "moversRow"]) {
 // Escape and backdrop dismissal never run the Close handler, so the dialog's
 for (const [sheetID, closeID, setSheet] of [
   ["protectionSheet", "protectionSheetClose", setProtectionSheetOpen],
+  ["portfolioTrimSheet", "portfolioTrimSheetClose", setPortfolioTrimSheetOpen],
   ["rulesSheet", "rulesSheetClose", setRulesSheetOpen],
 ]) {
   $(closeID).addEventListener("click", () => setSheet(false));
@@ -254,10 +255,6 @@ $("stressRulesNotesDialog").addEventListener("click", (event) => {
   // A modal dialog's own box is the backdrop hit target; children stop here.
   if (event.target === event.currentTarget) event.currentTarget.close();
 });
-$("protectionToggle").addEventListener("click", () => {
-  setProtectionExpansion(!state.protectionOpen);
-});
-$("protectionPanel").addEventListener("click", (event) => handleProtectionPanelTap(event));
 $("opportunitiesToggle").addEventListener("click", () => {
   setOpportunitiesExpansion(!state.opportunitiesOpen);
 });
@@ -278,13 +275,7 @@ $("portfolioDetailToggle").addEventListener("click", () => {
 $("portfolioPanel").addEventListener("click", handlePortfolioPanelTap);
 
 function openPortfolioTrimReview() {
-  setProtectionSheetOpen(true);
-  requestAnimationFrame(() => {
-    const panel = $("protectionDerisk");
-    if (!panel || panel.hidden) return;
-    panel.focus({ preventScroll: true });
-    panel.scrollIntoView({ block: "start" });
-  });
+  setPortfolioTrimSheetOpen(true);
 }
 
 function openOptionGroups(strategyID = "") {
@@ -303,7 +294,8 @@ function openOptionGroups(strategyID = "") {
   });
 }
 
-$("positionsStockReduction").addEventListener("click", openPortfolioTrimReview);
+$("positionsStockReduction").addEventListener("click", () => setProtectionSheetOpen(true));
+$("protectionTrimRoute").addEventListener("click", openPortfolioTrimReview);
 $("positionsOptionReduction").addEventListener("click", () => openOptionGroups());
 $("strategiesPanel").addEventListener("toggle", (event) => {
   $("positionsOptionReduction").setAttribute("aria-expanded", String(event.currentTarget.open));

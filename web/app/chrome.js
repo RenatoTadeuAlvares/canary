@@ -3,7 +3,7 @@ import { refreshEdge } from "./edge.js";
 import { renderRulesCard, renderStressDetail, renderRegimePanel } from "./stress.js";
 import { renderOpportunitiesPanel } from "./opportunities.js";
 import { setPortfolioExpansion } from "./portfolio.js";
-import { renderProtectionPanel } from "./protection.js";
+import { renderProtectionPanel, renderProtectionDerisk } from "./protection.js";
 import { renderAll } from "./render-runtime.js";
 import { $ } from "./shared.js";
 import { normalizedTab, state } from "./state.js";
@@ -140,11 +140,6 @@ function handlePortfolioPanelTap(event) {
   setPortfolioExpansion(!state.portfolioDetailOpen);
 }
 
-function handleProtectionPanelTap(event) {
-  if (panelTapIgnored(event.target)) return;
-  setProtectionExpansion(!state.protectionOpen);
-}
-
 function handleOpportunitiesPanelTap(event) {
   if (panelTapIgnored(event.target)) return;
   setOpportunitiesExpansion(!state.opportunitiesOpen);
@@ -185,8 +180,15 @@ function setSheetOpen(id, open) {
 }
 
 function setProtectionSheetOpen(open) {
+  if (open) setSheetOpen("portfolioTrimSheet", false);
   setProtectionExpansion(open);
   setSheetOpen("protectionSheet", open);
+}
+
+function setPortfolioTrimSheetOpen(open) {
+  if (open) setProtectionSheetOpen(false);
+  renderProtectionDerisk();
+  setSheetOpen("portfolioTrimSheet", open);
 }
 
 function setRulesSheetOpen(open) {
@@ -195,4 +197,4 @@ function setRulesSheetOpen(open) {
   setSheetOpen("rulesSheet", open);
 }
 
-export { ensureRegimeStressExpansion, handleAccountPanelTap, handleOpportunitiesPanelTap, handlePortfolioPanelTap, handleProtectionPanelTap, panelTapIgnored, renderTabs, resetViewportScroll, setAccountOverviewExpansion, setAccountValueVisible, setActiveTab, setOpportunitiesExpansion, setProtectionExpansion, setProtectionSheetOpen, setRegimeStressExpansion, setRulesSheetOpen, setSheetOpen, setupBottomTabs, sheetElement, syncAccountPrivacyState };
+export { ensureRegimeStressExpansion, handleAccountPanelTap, handleOpportunitiesPanelTap, handlePortfolioPanelTap, panelTapIgnored, renderTabs, resetViewportScroll, setAccountOverviewExpansion, setAccountValueVisible, setActiveTab, setOpportunitiesExpansion, setProtectionExpansion, setProtectionSheetOpen, setPortfolioTrimSheetOpen, setRegimeStressExpansion, setRulesSheetOpen, setSheetOpen, setupBottomTabs, sheetElement, syncAccountPrivacyState };

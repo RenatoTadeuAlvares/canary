@@ -48,6 +48,8 @@ const state = {
   portfolioDetailOpen: false,
   accountExposureOpen: false,
   protectionOpen: false,
+  protectionReviewOpen: {},
+  protectionCalculationsOpen: {},
   opportunitiesOpen: false,
   selectedMarket: localStorage.getItem("canarySelectedMarket") || "us",
   marketCalendarOverride: null,
