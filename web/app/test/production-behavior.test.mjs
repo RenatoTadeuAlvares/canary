@@ -280,6 +280,7 @@ test("Edge opens as an automatic one-year review and explains findings without t
   assert.equal(await edge.refreshEdge(), true);
   assert.match(dom.element("edgeLearning").textContent, /Same decisions/);
   assert.match(dom.element("edgeLearning").textContent, /Monthly results/);
+  assert.match(dom.element("edgeLearning").textContent, /Reviewed group: Long adds/);
   assert.match(dom.element("edgeLearning").textContent, /not proof of skill/);
   assert.match(dom.element("edgeOptionCycles").textContent, /Completed option positions/);
   assert.match(dom.element("edgeOptionCycles").textContent, /SYN CALL/);

@@ -812,11 +812,12 @@ function renderEdgeLearning(result) {
   };
   const selection = result.horizon_selection;
   nodes.push(paragraph(`${selection.scored_changes} of ${selection.eligible_changes} eligible stock/ETF changes reviewed (${Number(selection.coverage_pct).toFixed(0)}%). The rest are not assessed at this horizon.`, "edge-learning__coverage"));
-  if (result.review_note) nodes.push(paragraph(result.review_note));
   const patterns = result.patterns || [];
   const selected = patterns.find((p) => p.action === result.review_action && p.direction === result.review_direction);
   const horizon = selected?.horizons.find((h) => h.sessions === result.horizon_sessions);
   if (horizon) {
+    nodes.push(paragraph(`Reviewed group: ${labelize(selected.direction)} ${selected.action}s · ${horizon.sample_count} of ${selected.eligible_changes} changes at ${horizon.sessions} sessions.`, "edge-learning__coverage"));
+    if (result.review_note) nodes.push(paragraph(result.review_note));
     const size = horizon.notional_coverage_pct == null ? "Trade-size coverage unavailable: some execution amounts are missing." : `${Number(horizon.notional_coverage_pct).toFixed(0)}% of this group's execution notional is covered.`;
     nodes.push(paragraph(size));
     if (horizon.largest_date_share_pct != null) {
