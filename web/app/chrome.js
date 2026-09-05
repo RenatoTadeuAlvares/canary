@@ -36,11 +36,13 @@ function setupBottomTabs() {
 }
 
 function setActiveTab(tab, options = {}) {
+  const previous = state.activeTab;
   state.activeTab = normalizedTab(tab);
   if (options.persist !== false) {
     localStorage.setItem("canaryActiveTab", state.activeTab);
   }
   renderTabs();
+  if (previous !== state.activeTab) resetViewportScroll();
   handleAttentionContextChange();
   if (state.activeTab === "edge") void refreshEdge();
 }

@@ -384,6 +384,7 @@ function alertSourceLabel(source) {
 function alertPlacard(occurrence) {
   const source = alertSourceLabel(occurrence.source);
   const kind = String(occurrence.kind || "").replaceAll("_", " ");
+  if (occurrence.source === "rulebook" && kind === "governance") return source;
   return kind && kind.toLowerCase() !== source.toLowerCase() ? `${source} \u00b7 ${kind}` : source;
 }
 
@@ -393,7 +394,7 @@ function alertAgeLine(occurrence) {
   const parts = [`Since ${clockLabel(occurrence.first_seen_at)}`];
   if (occurrence.presentation_code === "risk_policy_drawdown_latched") parts.push("latched");
   else if (occurrence.evidence_health !== "current") parts.push("retained");
-  else parts.push(occurrence.severity);
+  else parts.push(humanAlertWord(occurrence.severity));
   if (occurrence.evidence_health !== "current") parts.push(`evidence ${occurrence.evidence_health}`);
   return parts.filter(Boolean).join(" \u00b7 ");
 }
@@ -602,6 +603,17 @@ function markAlertEvidenceTarget(target) {
   state.alertEvidenceTarget = target;
   const element = evidenceElement(target);
   if (!element) return null;
+  if (target.kind === "brief") {
+    const detail = $("briefDisclosure");
+    if (detail) detail.open = true;
+  }
+  if (target.kind === "rule") {
+    // A rule may sit in a collapsed group. Reveal both its group and evidence
+    // before focusing the stable destination.
+    for (let current = element; current; current = current.parentElement) {
+      if (current.tagName === "DETAILS") current.open = true;
+    }
+  }
   for (const previous of document.querySelectorAll?.(".is-alert-evidence-target") || []) {
     previous.classList.remove("is-alert-evidence-target");
     previous.removeAttribute("aria-current");
@@ -676,15 +688,25 @@ function alertRowElement(occurrence) {
   const factText = alertFactText(occurrence);
   const facts = document.createElement("small");
   facts.className = "pd-alert__facts";
-  facts.textContent = factText;
+  facts.textContent = factText.replace(/\b(\d+) long option position\(s\) have\b/g, (_, count) => `${count} long option ${Number(count) === 1 ? "position has" : "positions have"}`);
   facts.hidden = !factText;
+  // The precise served loss fact already contains this generic explanation.
+  // Any different explanation or evidence remains visible.
+  body.hidden = body.textContent === "A long option has crossed its premium-loss level."
+    && /\blong option position\(s\) have lost at least\b/.test(factText);
+  if (occurrence.presentation_code === "data_health_gamma"
+      && body.textContent === "The options positioning calculation is incomplete or too old."
+      && /^Gamma inputs (partial|stale|degraded|unavailable)\b/.test(factText)) body.hidden = true;
+  if (occurrence.presentation_code === "data_health_regime"
+      && body.textContent === "One or more market stress inputs are incomplete or too old."
+      && /\binputs (partial|stale|degraded|unavailable)\b/.test(factText)) body.hidden = true;
   const affected = alertAffectedPositions(occurrence);
   const affectedGroup = document.createElement("div");
   affectedGroup.className = "alert-row__affected";
   affectedGroup.hidden = affected.total === 0;
   if (affected.total > 0) {
     const affectedTitle = document.createElement("span");
-    affectedTitle.textContent = `Affected positions · ${affected.total}`;
+    affectedTitle.textContent = affected.total === 1 ? "Affected position" : `Affected positions · ${affected.total}`;
     const affectedList = document.createElement("span");
     affectedList.className = "alert-row__affected-list";
     for (const label of affected.labels) {
@@ -705,7 +727,7 @@ function alertRowElement(occurrence) {
   const action = document.createElement("span");
   action.className = "alert-row__action";
   action.textContent = `${alertActionCopy(occurrence)} \u2192`;
-  row.append(placard, title, body, facts, affectedGroup, age, action);
+  row.append(placard, title, facts, body, affectedGroup, age, action);
   return row;
 }
 
@@ -758,6 +780,7 @@ const DELIVERY_CLASS_COPY = {
 function deliveryCopy(health) {
   if (!health || health.state === "healthy") return "";
   if (health.state === "overflow") return "Alert delivery is blocked because the inbox is full.";
+  if (health.class === "no_active_subscription") return "No device is registered for phone notifications.";
   const reason = DELIVERY_CLASS_COPY[health.class] || (health.class ? humanAlertWord(health.class).toLowerCase() : "reason unavailable");
   return `Alert delivery is ${health.state}: ${reason}.`;
 }
@@ -801,10 +824,25 @@ function syncAppIconBadge(unread) {
 function renderSources(value) {
   const list = $("alertSourceList");
   if (!list) return;
+  const reference = $("alertSourceTimes");
+  if (reference) reference.hidden = true;
   if (!value?.initialized) {
     list.replaceChildren(emptyRow("Source status is unavailable."));
     return;
   }
+  // Clock-only labels use the reference date and zone above the list.
+  // Older dates, zone changes, and missing observations keep full labels.
+  const contextFor = (at) => {
+    const zone = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" }).formatToParts(new Date(at)).find((part) => part.type === "timeZoneName")?.value || "";
+    return `${calendarDate(at)} · ${zone}`;
+  };
+  const referenceAt = value.coverage?.as_of || value.as_of;
+  const sharedContext = referenceAt ? contextFor(referenceAt) : "";
+  if (reference && sharedContext) {
+    reference.textContent = `Clock times · ${sharedContext}`;
+    reference.hidden = false;
+  }
+  const sourceTime = (at) => sharedContext && reference && at && contextFor(at) === sharedContext ? calendarDateTime(at).split(" · ").at(-1) : timeLabel(at);
   const rows = value.sources.map((source) => {
     const row = document.createElement("div");
     // A source row reads lit only while its own served evidence says so; the
@@ -813,10 +851,20 @@ function renderSources(value) {
     const name = document.createElement("b");
     name.textContent = alertSourceLabel(source.source);
     const status = document.createElement("span");
-    status.textContent = `${source.status}${source.reason ? ` · ${source.reason}` : ""}`;
+    status.className = "alert-source-row__status";
+    status.textContent = humanAlertWord(source.status);
+    row.append(name, status);
+    if (source.reason && source.reason !== source.status) {
+      const reason = document.createElement("span");
+      reason.className = "alert-source-row__reason";
+      reason.textContent = humanAlertWord(source.reason);
+      row.append(reason);
+    }
     const timing = document.createElement("small");
-    timing.textContent = `Evidence ${timeLabel(source.evidence_as_of)} · current until ${timeLabel(source.fresh_until)}`;
-    row.append(name, status, timing);
+    timing.textContent = `Observed ${sourceTime(source.evidence_as_of)} · valid until ${sourceTime(source.fresh_until)}`;
+    timing.title = `Observed ${timeLabel(source.evidence_as_of)} · valid until ${timeLabel(source.fresh_until)}`;
+    timing.setAttribute("aria-label", timing.title);
+    row.append(timing);
     return row;
   });
   list.replaceChildren(...rows);
@@ -829,6 +877,14 @@ function renderDelivery(value) {
   if (banner) {
     banner.hidden = !warning;
     banner.textContent = warning;
+    if (warning && health?.class === "no_active_subscription") {
+      const settings = document.createElement("button");
+      settings.className = "alerts-delivery-settings";
+      settings.type = "button";
+      settings.textContent = "Notification settings ›";
+      settings.addEventListener("click", () => $("settingsButton")?.click());
+      banner.append(settings);
+    }
   }
   setText("alertDeliveryHealth", health ? `${health.state}${health.class ? ` · ${health.class}` : ""}` : "unavailable");
   setText("alertDeliveryAcceptance", health?.last_push_service_acceptance_at
@@ -844,12 +900,15 @@ function renderAlerts() {
   if (!value || !valid || !value.initialized) {
     const alerts = activeAlertItems([]);
     state.renderedAlertAttention = null;
-    if (placard) placard.hidden = false;
+    if (placard) placard.hidden = alerts.length === 0;
     setText("alertCount", alerts.length > 0 ? `${alerts.length} Open` : "Unknown");
     setText("currentSignalCount", String(alerts.length));
     setText("alertAuthorityState", "Unknown");
+    $("alertsPanel").dataset.state = "unknown";
+    setText("alertsTitle", alerts.length ? "Current alerts" : "Alert status unavailable");
+    $("alertCount").hidden = alerts.length === 0;
     setText("alertCoverageSummary", valid ? "Alert authority is not initialized." : "The latest alert update was rejected; retained evidence is not a current verdict.");
-    if (currentList) currentList.replaceChildren(...(alerts.length > 0 ? alerts.map((item) => alertRowElement(item.alert)) : [emptyRow("Current alert state is unavailable.")]));
+    if (currentList) currentList.replaceChildren(...(alerts.length > 0 ? alerts.map((item) => alertRowElement(item.alert)) : [emptyRow("Waiting for current source coverage.")]));
     renderSources(null);
     // Delivery health shares the feed's authority: an invalid or
     // uninitialized feed must not keep presenting the retained health as
@@ -866,10 +925,13 @@ function renderAlerts() {
   setText("alertCount", alerts.length > 0 ? `${alerts.length} Open` : authorityState);
   setText("currentSignalCount", String(alerts.length));
   setText("alertAuthorityState", authorityState);
+  $("alertsPanel").dataset.state = authorityState.toLowerCase();
+  setText("alertsTitle", authorityState === "Unknown" && alerts.length === 0 ? "Alert status unavailable" : "Current alerts");
+  $("alertCount").hidden = authorityState === "Unknown" && alerts.length === 0;
   setText("alertCoverageSummary", `${value.coverage.state} coverage · ${value.coverage.freshness} · ${value.coverage.covered_sources.length}/${value.coverage.expected_sources.length} sources · ${timeLabel(value.coverage.as_of)}`);
-  // The poster is the count: an engraved ALL DARK under an "ACTIVE 0" legend
+  // A zero count adds no information when clear or unknown already names the state.
   const posted = alerts.length === 0 && clear;
-  if (placard) placard.hidden = posted;
+  if (placard) placard.hidden = alerts.length === 0;
   if (currentList) {
     currentList.replaceChildren(...(alerts.length > 0
       ? alerts.map((item) => alertRowElement(item.alert))

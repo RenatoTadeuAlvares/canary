@@ -202,10 +202,6 @@ $("accountPanel").addEventListener("click", (event) => handleAccountPanelTap(eve
 $("stressDetailToggle").addEventListener("click", () => {
   setRegimeStressExpansion("stress", !state.stressDetailOpen);
 });
-$("stressRulesToggle").addEventListener("click", () => {
-  state.rulesDetailOpen = !state.rulesDetailOpen;
-  renderRulesCard(state.snapshot?.rules);
-});
 // Tap-through: the instrument that reports a subject is the way into the
 for (const [openerID, setSheet] of [
   ["protectionTile", setProtectionSheetOpen],

@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" content="#121418">
+    <meta name="theme-color" content="#0c0c0e">
     <title>Canary</title>
     <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
     <link rel="apple-touch-icon" href="/icon-192.png">
     <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="stylesheet" href="/styles.css?v=panel-dark-20260730">
+    <link rel="stylesheet" href="/styles.css?v=ios-20260905">
   </head>
   <body>
     <main class="shell">
@@ -38,6 +38,12 @@
           <b id="accountLabel">--</b>
           <span class="trading-env-pill" id="tradingEnvPill">--</span>
         </div>
+        <button class="icon-button account-privacy-toggle" id="accountPrivacyToggle" type="button" aria-label="Show account values" aria-pressed="false" title="Show account values">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 12s3.4-6 9-6 9 6 9 6-3.4 6-9 6-9-6-9-6Z"></path>
+            <circle cx="12" cy="12" r="2.6"></circle>
+          </svg>
+        </button>
         <button class="icon-button app-settings-button" id="settingsButton" type="button" aria-label="Open Settings" aria-pressed="false" title="Settings">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <circle cx="12" cy="12" r="3"></circle>
@@ -61,60 +67,6 @@
         </div>
       </section>
 
-      <article class="panel account-panel" id="accountPanel" aria-label="Account and risk">
-        <div class="account-metrics">
-          <button class="icon-button account-privacy-toggle" id="accountPrivacyToggle" type="button" aria-label="Show account values" aria-pressed="false" title="Show account values">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M3 12s3.4-6 9-6 9 6 9 6-3.4 6-9 6-9-6-9-6Z"></path>
-              <circle cx="12" cy="12" r="2.6"></circle>
-            </svg>
-          </button>
-          <div class="account-primary">
-            <span>Net Liq</span>
-            <strong id="netLiquidation">--</strong>
-          </div>
-          <div class="account-primary">
-            <span>Buying Power</span>
-            <strong id="buyingPower">--</strong>
-          </div>
-          <div class="account-primary">
-            <span>Daily P/L</span>
-            <strong id="dailyPnl">--</strong>
-            <small id="dailyPnlPct">--</small>
-          </div>
-        </div>
-        <div class="account-panel__top">
-          <button class="panel-chevron account-overview-toggle" id="accountOverviewToggle" type="button" aria-expanded="false" aria-controls="accountOverviewDetail">
-            Show detail
-          </button>
-          <span class="account-panel__freshness" id="accountAsOf">--</span>
-        </div>
-        <div class="account-overview-detail" id="accountOverviewDetail" hidden>
-          <div class="account-risk-strip">
-            <div class="account-risk-item">
-              <span>Net $ Delta</span>
-              <b id="accountRiskDelta">--</b>
-            </div>
-            <div class="account-risk-item">
-              <span>Theta/day</span>
-              <b id="accountRiskTheta">--</b>
-            </div>
-            <div class="account-risk-item">
-              <span>FX 1%</span>
-              <b id="accountRiskFx">--</b>
-            </div>
-            <button class="account-risk-item account-risk-item--button" id="accountLargestExposureToggle" type="button" aria-expanded="false" aria-controls="accountLargestExposurePanel">
-              <span>Largest exposure</span>
-              <b id="accountLargestExposureLabel">--</b>
-            </button>
-          </div>
-          <div class="account-exposure-panel" id="accountLargestExposurePanel" hidden>
-            <div class="exposure-list" id="accountLargestExposureList"></div>
-          </div>
-        </div>
-        <span class="sr-only" id="cushion">--</span>
-      </article>
-
       <section class="pairing" id="pairingPanel" hidden>
         <div class="pairing__body">
           <div>
@@ -127,25 +79,74 @@
 
       <section class="tab-panels" id="tabPanels" hidden>
       <section class="dashboard tab-panel" id="dashboard" data-tab-panel="monitor" role="tabpanel" aria-labelledby="tabMonitor">
-        <header class="workspace-heading workspace-heading--tab" aria-labelledby="monitorWorkspaceTitle">
+        <header class="workspace-heading workspace-heading--tab sr-only" aria-labelledby="monitorWorkspaceTitle">
           <div class="workspace-heading__intro">
-            <div class="workspace-heading__overline">
-              <span>Market desk</span>
-            </div>
             <h2 id="monitorWorkspaceTitle">Monitor</h2>
           </div>
         </header>
+        <details class="panel account-disclosure">
+          <summary>Account</summary>
+          <article class="panel account-panel" id="accountPanel" aria-label="Account and risk">
+            <div class="account-metrics">
+              <div class="account-primary">
+                <span>Net Liq</span>
+                <strong id="netLiquidation">--</strong>
+              </div>
+              <div class="account-primary">
+                <span>Buying Power</span>
+                <strong id="buyingPower">--</strong>
+              </div>
+              <div class="account-primary">
+                <span>Daily P/L</span>
+                <strong id="dailyPnl">--</strong>
+                <small id="dailyPnlPct">--</small>
+              </div>
+            </div>
+            <div class="account-panel__top">
+              <button class="panel-chevron account-overview-toggle" id="accountOverviewToggle" type="button" aria-expanded="false" aria-controls="accountOverviewDetail">
+                Show detail
+              </button>
+              <span class="account-panel__freshness" id="accountAsOf">--</span>
+            </div>
+            <div class="account-overview-detail" id="accountOverviewDetail" hidden>
+              <div class="account-risk-strip">
+                <div class="account-risk-item">
+                  <span>Net $ Delta</span>
+                  <b id="accountRiskDelta">--</b>
+                </div>
+                <div class="account-risk-item">
+                  <span>Theta/day</span>
+                  <b id="accountRiskTheta">--</b>
+                </div>
+                <div class="account-risk-item">
+                  <span>FX 1%</span>
+                  <b id="accountRiskFx">--</b>
+                </div>
+                <button class="account-risk-item account-risk-item--button" id="accountLargestExposureToggle" type="button" aria-expanded="false" aria-controls="accountLargestExposurePanel">
+                  <span>Largest exposure</span>
+                  <b id="accountLargestExposureLabel">--</b>
+                </button>
+              </div>
+              <div class="account-exposure-panel" id="accountLargestExposurePanel" hidden>
+                <div class="exposure-list" id="accountLargestExposureList"></div>
+              </div>
+            </div>
+            <span class="sr-only" id="cushion">--</span>
+          </article>
+        </details>
         <article class="panel brief-panel" id="briefPanel" hidden>
-          <div class="panel-head">
-            <span>Daily brief</span>
-            <span class="panel-time" id="briefAsOf">--</span>
-          </div>
           <div class="source-inline brief-source" id="briefSourceBanner" role="status" hidden></div>
-          <div class="brief-sections" id="briefSections"></div>
+          <details class="brief-disclosure" id="briefDisclosure">
+            <summary class="panel-head">
+              <span>Daily brief</span>
+              <span class="panel-time" id="briefAsOf">--</span>
+            </summary>
+            <div class="brief-sections" id="briefSections"></div>
+          </details>
         </article>
         <article class="panel signal-panel signal-panel--combined" id="signalPanel">
-          <div class="panel-head">
-            <span>Market &amp; Portfolio</span>
+          <div class="panel-head signal-panel__freshness">
+            <span class="sr-only">Market &amp; Portfolio</span>
             <span class="panel-time-group">
               <span class="panel-time" id="regimeAsOf" title="Market regime freshness">--</span>
               <span class="panel-time-sep" aria-hidden="true">·</span>
@@ -159,13 +160,14 @@
           </div>
           <div class="pd-lamptest" id="lampTest">
             <button class="pd-lamptest__stamp" id="lampTestButton" type="button" aria-haspopup="dialog">
+              <span class="source-details-label sr-only">Data sources</span>
               <span id="lampTestStamp">Last snapshot --</span>
             </button>
             <span class="pd-hold" aria-hidden="true">Hold to test</span>
           </div>
           <dialog class="app-dialog app-dialog--lamptest" id="lampTestDialog" aria-labelledby="lampTestDialogTitle">
             <div class="app-dialog__head">
-              <b id="lampTestDialogTitle">Lamp test</b>
+              <b id="lampTestDialogTitle">Data sources</b>
               <button class="app-dialog__close" id="lampTestDialogClose" type="button">Close</button>
             </div>
             <div class="app-dialog__body">
@@ -175,6 +177,7 @@
                   <span class="pd-chip" id="alertAuthorityState">Unknown</span>
                 </div>
                 <p class="alert-authority__summary" id="alertCoverageSummary">Alert authority has not initialized yet.</p>
+                <p class="alert-authority__times" id="alertSourceTimes" hidden></p>
                 <div class="alert-authority__sources" id="alertSourceList"></div>
                 <div class="pd-placard">Delivery</div>
                 <div class="alert-authority__delivery">
@@ -198,24 +201,7 @@
             </div>
           </dialog>
           <div class="pd-placard pd-placard--row">
-            <span>Market Regime</span>
-            <button class="signal-half__toggle" id="regimeDetailToggle" type="button" aria-expanded="false" aria-controls="regimeDetailPanel">
-              Show detail
-            </button>
-          </div>
-          <div class="pd-grid regime-grid weather-na" id="regimeSummaryCard" role="group" aria-label="Market regime clusters"></div>
-          <!-- Regime detail expands directly under its own tiles, never in a
-               shared deck below the Desk section. -->
-          <div class="signal-detail-col regime-detail-panel" id="regimeDetailPanel" hidden>
-            <div class="regime-indicators" id="regimeIndicators"></div>
-            <div class="source-inline" id="regimeQualityRemarks" role="status" hidden>
-              <span>Data quality</span>
-              <b id="regimeQualityText">--</b>
-            </div>
-            <p class="regime-governed-note" id="marketRegimeMix" hidden>Waiting for market evidence</p>
-          </div>
-          <div class="pd-placard pd-placard--row">
-            <span>Desk</span>
+            <span>Portfolio</span>
             <button class="signal-half__toggle" id="stressDetailToggle" type="button" aria-expanded="false" aria-controls="stressDetailPanel">
               Show detail
             </button>
@@ -266,6 +252,23 @@
               <div class="held-stress__list" id="heldStressList"></div>
             </div>
             <div class="detail-list" id="stressDrivers"></div>
+          </div>
+          <div class="pd-placard pd-placard--row">
+            <span>Market conditions</span>
+            <button class="signal-half__toggle" id="regimeDetailToggle" type="button" aria-expanded="false" aria-controls="regimeDetailPanel">
+              Show detail
+            </button>
+          </div>
+          <div class="pd-grid regime-grid weather-na" id="regimeSummaryCard" role="group" aria-label="Market regime clusters"></div>
+          <!-- Regime detail expands directly under its own tiles, never in a
+               shared deck below the Desk section. -->
+          <div class="signal-detail-col regime-detail-panel" id="regimeDetailPanel" hidden>
+            <div class="regime-indicators" id="regimeIndicators"></div>
+            <div class="source-inline" id="regimeQualityRemarks" role="status" hidden>
+              <span>Data quality</span>
+              <b id="regimeQualityText">--</b>
+            </div>
+            <p class="regime-governed-note" id="marketRegimeMix" hidden>Waiting for market evidence</p>
           </div>
           <div class="pd-placard pd-depth-link" id="moversPlacard" role="button" tabindex="0" aria-controls="positionsTab" aria-label="Open positions" hidden>Daily P/L by name</div>
           <div class="pd-movers pd-depth-link" id="moversRow" role="button" tabindex="0" aria-controls="positionsTab" aria-label="Open positions" hidden></div>
@@ -328,28 +331,11 @@
           <header class="workspace-heading positions-workspace__mast">
             <div class="workspace-heading__intro">
               <div class="workspace-heading__overline">
-                <span>Live book</span>
                 <span class="panel-time" id="underlyingBookFreshness">--</span>
               </div>
               <h2 id="positionsGuideTitle">Positions</h2>
-              <p class="workspace-heading__copy">Watch what moved and how each position performed. Select a row for exposure, composition, and the reduction paths Canary can actually support.</p>
             </div>
-            <div class="positions-workspace__routes" aria-label="Portfolio action routes">
-              <button class="positions-route" id="positionsStockReduction" type="button" aria-haspopup="dialog" aria-controls="protectionSheet">
-                <span>
-                  <b>Portfolio trim</b>
-                  <small>Whole-book &Delta; review</small>
-                </span>
-                <strong aria-hidden="true">&nearr;</strong>
-              </button>
-              <button class="positions-route" id="positionsOptionReduction" type="button" aria-controls="strategiesPanel" aria-expanded="false">
-                <span>
-                  <b>Option groups</b>
-                  <small>Daemon-kept combos</small>
-                </span>
-                <strong aria-hidden="true">&darr;</strong>
-              </button>
-            </div>
+
           </header>
           <div class="underlying-book" id="underlyingBook">
             <div class="underlying-pnl-summary" aria-label="Today's position profit and loss totals">
@@ -369,15 +355,14 @@
             <div class="underlying-book__list-panel" id="underlyingBookListPanel">
               <div class="underlying-book__head">
                 <div>
-                  <span>Position book</span>
                   <b id="underlyingBookCount">No underlyings</b>
+                  <small id="underlyingBookStatus">Current held underlyings</small>
                 </div>
                 <div class="positions-book__tools">
-                  <small id="underlyingBookStatus">Current held underlyings</small>
                   <label class="positions-sort" for="positionsSort">
-                    <span>Sort</span>
+                    <span class="sr-only">Sort</span>
                     <select id="positionsSort" aria-label="Sort positions">
-                      <option value="impact">Biggest daily move</option>
+                      <option value="impact">Biggest move</option>
                       <option value="winners">Winners first</option>
                       <option value="losers">Losers first</option>
                       <option value="exposure">Largest exposure</option>
@@ -388,6 +373,22 @@
               </div>
               <div class="underlying-book__list" id="underlyingBookList"></div>
             </div>
+          </div>
+          <div class="positions-workspace__routes" aria-label="Portfolio action routes">
+            <button class="positions-route" id="positionsStockReduction" type="button" aria-haspopup="dialog" aria-controls="protectionSheet">
+              <span>
+                <b>Portfolio trim</b>
+                <small>Review protection</small>
+              </span>
+              <strong aria-hidden="true">&nearr;</strong>
+            </button>
+            <button class="positions-route" id="positionsOptionReduction" type="button" aria-controls="strategiesPanel" aria-expanded="false">
+              <span>
+                <b>Option groups</b>
+                <small>Review strategies</small>
+              </span>
+              <strong aria-hidden="true">&darr;</strong>
+            </button>
           </div>
         </article>
 
@@ -406,7 +407,7 @@
             <span class="panel-time" id="strategiesAsOf">--</span>
           </summary>
           <div class="strategies-body">
-            <p class="strategies-intro">These are exact daemon-authored groups, not client-side guesses. Preview keeps the full combo together; the daemon and broker still decide eligibility.</p>
+            <p class="strategies-intro">Preview all legs together. Broker eligibility is checked before submission.</p>
             <div class="strategies-list" id="strategiesList"></div>
           </div>
         </details>
@@ -416,11 +417,10 @@
         <header class="workspace-heading workspace-heading--tab" aria-labelledby="edgeWorkspaceTitle">
           <div class="workspace-heading__intro">
             <div class="workspace-heading__overline">
-              <span>Broker-truth review</span>
               <span class="panel-time" id="edgeAsOf">not loaded</span>
             </div>
             <h2 id="edgeWorkspaceTitle">Edge</h2>
-            <p class="workspace-heading__copy">Canary automatically reviews one year of broker-confirmed trades to show where your decisions historically helped—or hurt. Observed behavior, not a forecast.</p>
+            <p class="workspace-heading__copy">One year of trading decisions</p>
           </div>
         </header>
 
@@ -438,27 +438,35 @@
         <section class="edge-results" id="edgeResults" hidden>
           <article class="panel edge-impact" aria-labelledby="edgeImpactTitle">
             <div class="panel-head">
-              <span id="edgeImpactTitle">What your covered decisions show</span>
+              <span id="edgeImpactTitle">Decision review</span>
               <span class="panel-time" id="edgeImpactLens">One year · 20-session headline</span>
             </div>
             <p class="edge-headline" id="edgeHeadline">--</p>
-            <div class="edge-learning" id="edgeLearning"></div>
-            <div class="edge-market-context" id="edgeMarketContext" aria-label="Informational market context"></div>
-            <div class="edge-matrix" id="edgeMatrix" role="table" aria-label="Decision price impact by action and horizon"></div>
+            <div class="edge-review-scope" id="edgeReviewScope"></div>
           </article>
 
           <article class="panel edge-findings-panel" aria-labelledby="edgeFindingsTitle">
             <div class="panel-head">
-              <span id="edgeFindingsTitle">Where decisions helped or hurt</span>
-              <span class="panel-time">Tap to explain · maximum 3</span>
+              <span id="edgeFindingsTitle">Price outcomes after decisions</span>
             </div>
+            <p class="edge-findings-basis" id="edgeFindingsBasis">Price impact · % of decision notional</p>
             <div class="edge-findings" id="edgeFindings"></div>
+          </article>
+
+          <article class="panel edge-review-evidence" aria-label="Review evidence">
+            <div class="edge-learning" id="edgeLearning"></div>
+            <details class="edge-analysis">
+              <summary>Covered decisions by horizon</summary>
+              <p class="edge-matrix-note">Each horizon uses a different sample. Use matched comparisons to compare later closes.</p>
+              <div class="edge-market-context" id="edgeMarketContext" aria-label="Informational market context"></div>
+              <div class="edge-matrix" id="edgeMatrix" role="table" aria-label="Decision price impact by action and horizon"></div>
+            </details>
           </article>
 
           <article class="panel edge-change-panel" id="edgeChangePanel" aria-labelledby="edgeChangeTitle" hidden>
             <div class="panel-head">
               <span id="edgeChangeTitle">Decision explanation</span>
-              <span class="panel-time">Read-only broker evidence</span>
+              <span class="panel-time">Broker evidence</span>
             </div>
             <p class="edge-change__meta" id="edgeChangeMeta"></p>
             <dl class="edge-change__facts" id="edgeChangeSummary"></dl>
@@ -479,7 +487,7 @@
               <span id="edgeOptionsTitle">Options · broker actual</span>
               <span class="panel-time" id="edgeOptionsCount">--</span>
             </div>
-            <p class="edge-options__note">Realized episodes and the latest dated open snapshot stay separate. Gains and losses are seated before magnitude ranking. Tap a row for exact broker facts; Canary does not infer strategies, rolls, intent, or expired-option counterfactuals.</p>
+            <p class="edge-options__note">Realized and open P/L are shown separately. Open a position for its broker records.</p>
             <section id="edgeOptionCycles" class="edge-option-cycles" aria-label="Completed option positions"></section>
             <p class="edge-option-coverage" id="edgeOptionCoverage"></p>
             <div class="edge-option-scopes" id="edgeOptionList">
@@ -505,7 +513,7 @@
           <article class="panel edge-option-detail-panel" id="edgeOptionPanel" aria-labelledby="edgeOptionDetailTitle" hidden>
             <div class="panel-head">
               <span id="edgeOptionDetailTitle">Option evidence</span>
-              <span class="panel-time">Read-only broker evidence</span>
+              <span class="panel-time">Broker evidence</span>
             </div>
             <p class="edge-option-detail__meta" id="edgeOptionDetailMeta"></p>
             <dl class="edge-change__facts" id="edgeOptionDetailSummary"></dl>
@@ -529,9 +537,6 @@
       <section class="tab-panel tab-panel--alerts" id="alertsTab" data-tab-panel="alerts" role="tabpanel" aria-labelledby="tabAlerts" hidden>
         <header class="workspace-heading workspace-heading--tab" aria-labelledby="alertsWorkspaceTitle">
           <div class="workspace-heading__intro">
-            <div class="workspace-heading__overline">
-              <span>Attention queue</span>
-            </div>
             <h2 id="alertsWorkspaceTitle">Alerts</h2>
           </div>
         </header>
@@ -542,7 +547,7 @@
                 <path d="M6.5 10.5a5.5 5.5 0 0 1 11 0c0 5 2 5.5 2 7H4.5c0-1.5 2-2 2-7Z"></path>
                 <path d="M10 20a2.3 2.3 0 0 0 4 0"></path>
               </svg>
-              Current alerts
+              <span id="alertsTitle">Current alerts</span>
             </span>
             <span class="alert-active-count" id="alertCount">0 Active</span>
           </summary>
@@ -562,9 +567,6 @@
       <section class="tab-panel tab-panel--orders" id="ordersTab" data-tab-panel="orders" role="tabpanel" aria-labelledby="tabOrders" hidden>
         <header class="workspace-heading workspace-heading--tab" aria-labelledby="ordersWorkspaceTitle">
           <div class="workspace-heading__intro">
-            <div class="workspace-heading__overline">
-              <span>Order journal</span>
-            </div>
             <h2 id="ordersWorkspaceTitle">Orders</h2>
           </div>
         </header>
@@ -576,7 +578,7 @@
                 <path d="M5 12h14"></path>
                 <path d="M5 17h8"></path>
               </svg>
-              Open Orders
+              <span id="ordersOpenTitle">Open orders</span>
             </span>
             <span class="alert-active-count" id="ordersOpenCount">0 open</span>
             <span class="panel-time" id="ordersAsOf" title="Open-order view last checked">--</span>
@@ -586,7 +588,7 @@
             <!-- Engraved foot: the journal states the order authority used by
                  the open-order controls and grouped-position exits above. -->
             <div class="pd-lamptest orders-foot">
-              <span>Order journal &middot; current broker and local order state</span>
+              <span>Broker and local order status</span>
             </div>
           </div>
         </article>
@@ -596,7 +598,6 @@
         <header class="workspace-heading workspace-heading--tab" aria-labelledby="settingsWorkspaceTitle">
           <div class="workspace-heading__intro">
             <div class="workspace-heading__overline">
-              <span>Control panel</span>
               <span class="panel-time" id="settingsAsOf">--</span>
             </div>
             <h2 id="settingsWorkspaceTitle">Settings</h2>
@@ -715,11 +716,20 @@
       </section>
       </section>
 
-      <footer class="pd-lamptest sync-strip" id="syncStrip" hidden>
-        <span class="sync-strip__state" id="syncStatusState">standby</span>
-        <span class="sync-strip__label" id="syncStatusLabel">Snapshot</span>
-        <b class="sync-strip__time" id="syncStatusTime">--</b>
-        <span class="sync-strip__version" id="syncVersion" hidden>--</span>
+      <footer class="sync-strip" id="syncStrip" hidden>
+        <details class="sync-details">
+          <summary>
+            <span class="sync-details__title">Connection details</span>
+            <span class="sync-details__health">
+              <span class="sync-strip__state" id="syncStatusState">standby</span>
+              <span class="sync-strip__label" id="syncStatusLabel">Snapshot</span>
+            </span>
+          </summary>
+          <div class="sync-details__body">
+            <b class="sync-strip__time" id="syncStatusTime">--</b>
+            <span class="sync-strip__version" id="syncVersion" hidden>--</span>
+          </div>
+        </details>
         <button class="sync-strip__update" id="updateAction" type="button" hidden></button>
       </footer>
       </div>
@@ -819,15 +829,15 @@
           <button class="app-dialog__close" id="rulesSheetClose" type="button">Close</button>
         </div>
         <div class="app-dialog__body app-sheet__body">
-          <div class="pd-placard pd-placard--row">
-            <span>Checklist</span>
-            <b id="rulesSheetTally">--</b>
+          <div class="rules-sheet__intro">
+            <span id="rulesSheetTally">--</span>
+            <span id="rulesSheetEvaluated"></span>
           </div>
-          <p class="rules-sheet__provenance" id="rulesSheetProvenance" hidden>--</p>
+          <p class="rules-sheet__source" id="rulesSheetSource" role="status" hidden></p>
+          <div class="detail-panel detail-panel--dark stress-rules-detail" id="stressRulesDetailPanel" hidden>
+            <div class="rules-checklist" id="stressRulesGrid"></div>
+          </div>
           <div class="stress-rules__strip" id="stressRulesStrip" hidden>
-            <div class="stress-rules__brief" id="stressRulesBrief"></div>
-            <div class="stress-rules__strip-actions">
-              <button class="signal-half__toggle" id="stressRulesToggle" type="button" aria-expanded="false" aria-controls="stressRulesDetailPanel">Show rules</button>
               <button class="stress-rules__notes-trigger" id="stressRulesNotesToggle" type="button" aria-haspopup="dialog" hidden>
                 <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">
                   <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5"></circle>
@@ -836,11 +846,8 @@
                 </svg>
                 <span id="stressRulesNotesLabel">Data notes</span>
               </button>
-            </div>
           </div>
-          <div class="detail-panel detail-panel--dark stress-rules-detail" id="stressRulesDetailPanel" hidden>
-            <div class="detail-grid rules-checklist" id="stressRulesGrid"></div>
-          </div>
+          <p class="rules-sheet__provenance" id="rulesSheetProvenance" hidden>--</p>
           <dialog class="app-dialog" id="stressRulesNotesDialog" aria-labelledby="stressRulesNotesTitle">
             <div class="app-dialog__head">
               <b id="stressRulesNotesTitle">Data notes</b>

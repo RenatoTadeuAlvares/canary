@@ -161,29 +161,31 @@ test("primary navigation seats Edge and keeps Settings behind the header gear", 
   assert.match(html, /id="dashboard"[^>]*data-tab-panel="monitor"[\s\S]*id="briefPanel"/);
   assert.doesNotMatch(html, /id="tabBrief"|id="briefTab"|id="tabSettings"|id="underlyingsSheet"|id="edgeWindow"|id="edgeHorizon"/);
   assert.doesNotMatch(html, /id="attentionStatus"/);
-  assert.match(html, /automatically reviews one year of broker-confirmed trades/);
-  assert.match(html, /Where decisions helped or hurt/);
+  assert.match(html, /One year of trading decisions/);
+  assert.match(html, /Price outcomes after decisions/);
   assert.ok(html.indexOf('class="panel edge-impact"') < html.indexOf('class="panel edge-account"'), "decision insight must lead account P/L");
 });
 
-test("primary workspaces share the Positions overline and title hierarchy", async () => {
+test("primary workspaces have a clear title and keep explanatory prose out of navigation", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  const css = await readFile(new URL("../styles.css", import.meta.url), "utf8");
   const headings = [
-    ["dashboard", "Market desk", "monitorWorkspaceTitle", "Monitor"],
-    ["positionsTab", "Live book", "positionsGuideTitle", "Positions"],
-    ["edgeTab", "Broker-truth review", "edgeWorkspaceTitle", "Edge"],
-    ["alertsTab", "Attention queue", "alertsWorkspaceTitle", "Alerts"],
-    ["ordersTab", "Order journal", "ordersWorkspaceTitle", "Orders"],
-    ["settingsTab", "Control panel", "settingsWorkspaceTitle", "Settings"],
+    ["dashboard", "monitorWorkspaceTitle", "Monitor"],
+    ["positionsTab", "positionsGuideTitle", "Positions"],
+    ["edgeTab", "edgeWorkspaceTitle", "Edge"],
+    ["alertsTab", "alertsWorkspaceTitle", "Alerts"],
+    ["ordersTab", "ordersWorkspaceTitle", "Orders"],
+    ["settingsTab", "settingsWorkspaceTitle", "Settings"],
   ];
-  for (const [panelID, overline, titleID, title] of headings) {
-    const escapedOverline = overline.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    assert.match(html, new RegExp(`id="${panelID}"[\\s\\S]{0,700}workspace-heading__overline[\\s\\S]{0,160}>${escapedOverline}<\\/span>[\\s\\S]{0,240}<h2 id="${titleID}">${title}<\\/h2>`));
+  for (const [panelID, titleID, title] of headings) {
+    const panel = html.slice(html.indexOf(`id="${panelID}"`));
+    const header = panel.slice(0, panel.indexOf("</header>"));
+    assert.ok(header.includes(`aria-labelledby="${titleID}"`));
+    assert.ok(header.includes(`<h2 id="${titleID}">${title}</h2>`));
   }
-  assert.equal((html.match(/class="workspace-heading(?: workspace-heading--tab| positions-workspace__mast)"/g) || []).length, 6);
-  assert.match(css, /\.workspace-heading__overline\s*\{[^}]*color:\s*var\(--pd-advisory\);[^}]*text-transform:\s*uppercase;/s);
-  assert.match(css, /\.workspace-heading h2\s*\{[^}]*color:\s*var\(--pd-readout\);[^}]*font-size:\s*clamp\(24px, 4vw, 30px\);/s);
+  assert.equal((html.match(/class="workspace-heading(?: workspace-heading--tab| positions-workspace__mast)(?: sr-only)?"/g) || []).length, 6);
+  assert.match(html, /<details class="brief-disclosure"[^>]*>/);
+  assert.doesNotMatch(html, /<details class="brief-disclosure"[^>]* open/);
+  assert.ok(html.indexOf('id="briefSourceBanner"') < html.indexOf('class="brief-disclosure"'), "brief source warnings remain outside the disclosure");
 });
 
 test("Edge opens as an automatic one-year review and explains findings without trading controls", async () => {
@@ -280,13 +282,13 @@ test("Edge opens as an automatic one-year review and explains findings without t
   assert.equal(await edge.refreshEdge(), true);
   assert.match(dom.element("edgeLearning").textContent, /Same decisions/);
   assert.match(dom.element("edgeLearning").textContent, /Monthly results/);
-  assert.match(dom.element("edgeLearning").textContent, /Reviewed group: Long adds/);
+  assert.match(dom.element("edgeLearning").textContent, /Long adds/);
   assert.match(dom.element("edgeLearning").textContent, /not proof of skill/);
   assert.match(dom.element("edgeOptionCycles").textContent, /Completed option positions/);
   assert.match(dom.element("edgeOptionCycles").textContent, /SYN CALL/);
   assert.match(dom.element("edgeOptionCycles").children[4].children[0].textContent, /Partial/);
   assert.deepEqual(requests, ["/api/edge"]);
-  assert.equal(dom.element("edgeImpactLens").textContent, "One year · automatic · 20-session headline");
+  assert.equal(dom.element("edgeImpactLens").textContent, "After 20 sessions");
   assert.match(dom.element("edgeMarketContext").textContent, /S&P 500 proxy \(SPY\) \+2\.10%/);
   state.edgeResult = { ...result, market_context: result.market_context.filter((row) => row.key !== "vix"), market_context_missing: ["vix"] };
   edge.renderEdge();
@@ -294,7 +296,7 @@ test("Edge opens as an automatic one-year review and explains findings without t
   state.edgeResult = result;
   edge.renderEdge();
   assert.equal(dom.element("edgeAccountValue").textContent, "******");
-  assert.equal(dom.element("edgeHeadline").textContent, "Reveal account values to view the monetary headline.");
+  assert.equal(dom.element("edgeHeadline").textContent, "Account values hidden");
   const finding = byClass(dom.element("edgeFindings"), "edge-finding")[0];
   assert.equal(finding.tagName, "BUTTON");
   assert.equal(finding.getAttribute("aria-expanded"), "false");
@@ -502,7 +504,7 @@ test("Settings date format uses the typed platform-settings patch and repaints",
 test("Positions is performance-first while typed risk and guarded actions stay behind selection", async () => {
   reset();
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  assert.match(html, /Watch what moved and how each position performed/);
+  assert.match(html, /<h2 id="positionsGuideTitle">Positions<\/h2>/);
   assert.match(html, />Portfolio trim</);
   assert.match(html, />Option groups</);
   assert.doesNotMatch(html, /Stock &amp; ETF risk|underlyingDetailToggle/);
@@ -537,10 +539,19 @@ test("Positions is performance-first while typed risk and guarded actions stay b
     daily: 12, open: 45, value: 1200, delta: 825,
   });
   const rendered = underlyings.underlyingBookRow(row, "EUR");
-  assert.equal(byClass(rendered, "underlying-row__metric--pnl")[0].textContent.includes("Today"), true);
-  assert.equal(byClass(rendered, "underlying-row__metric--open")[0].textContent.includes("Open"), true);
+  assert.equal(byClass(rendered, "underlying-row__metric--pnl")[0].textContent.includes("Daily P/L"), true);
+  assert.equal(byClass(rendered, "underlying-row__metric--open")[0].textContent.includes("Unrealized P/L"), true);
   assert.match(byClass(rendered, "position-inspector__distinction")[0].textContent, /Color shows direction, not an instruction/);
   assert.deepEqual(byClass(rendered, "position-inspector__action").map((button) => button.dataset.positionAction), ["strategy", "trim"]);
+  const mark = underlyings.underlyingBookRow({ ...row, price: 0, priceSource: "account mark" }, "EUR");
+  assert.match(byClass(mark, "underlying-row__metric--quote")[0].textContent, /Account mark/);
+  assert.match(byClass(mark, "underlying-row__metric--quote")[0].textContent, /0[.,]00/);
+  const current = { ...state.snapshot.positions, authority: { availability: "available", freshness: "current", as_of: new Date().toISOString() } };
+  underlyings.renderUnderlyings(current, {});
+  assert.equal(dom.element("underlyingLoserPnl").textContent, "None");
+  underlyings.renderUnderlyings({ ...current, by_underlying: [{ underlying: "MISSING", stock: { currency: "USD" }, options: [] }] }, {});
+  assert.equal(dom.element("underlyingLoserPnl").textContent, "Unavailable");
+
   assert.match(byClass(rendered, "position-inspector__scope")[0].textContent, /whole-book delta tool/);
 
   const rows = [
@@ -721,11 +732,15 @@ test("alert taps resolve to exact evidence targets", () => {
   assert.deepEqual(alertInbox.alertEvidenceTarget({ presentation_code: "order_integrity_mismatch" }), { kind: "orders" });
 
   const rule = stress.ruleChecklistRow({ id: "hedge_integrity", number: 12, title: "Protection assignment", status: "act", evidence: "Directional short." });
+  const ruleGroup = new FakeElement("details");
+  ruleGroup.append(rule);
   const originalQuery = dom.document.querySelectorAll;
   dom.document.querySelectorAll = (selector) => selector === "[data-rule-id]" ? [rule] : selector === ".is-alert-evidence-target" && rule.classList.contains("is-alert-evidence-target") ? [rule] : [];
   alertInbox.openAlertEvidence({ presentation_code: "rulebook_hedge_integrity" });
   assert.equal(rule.classList.contains("is-alert-evidence-target"), true);
   assert.equal(rule.getAttribute("aria-current"), "location");
+  assert.equal(rule.open, true, "an alert opens the selected rule's evidence");
+  assert.equal(ruleGroup.open, true, "an alert opens a collapsed result group");
   const rerenderedRule = stress.ruleChecklistRow({ id: "hedge_integrity", number: 12, title: "Protection assignment", status: "act", evidence: "Directional short." });
   assert.equal(rerenderedRule.classList.contains("is-alert-evidence-target"), true, "selected Rulebook target survives a render");
   assert.equal(rerenderedRule.getAttribute("aria-current"), "location");
@@ -734,6 +749,9 @@ test("alert taps resolve to exact evidence targets", () => {
   alertInbox.openAlertEvidence({ presentation_code: "regime_market_stress" });
   assert.equal(dom.element("regimeDetailPanel").classList.contains("is-alert-evidence-target"), true);
   assert.equal(dom.element("regimeDetailPanel").getAttribute("aria-current"), "location");
+  dom.element("briefDisclosure").open = false;
+  alertInbox.openAlertEvidence({ presentation_code: "risk_policy_drawdown_latched" });
+  assert.equal(dom.element("briefDisclosure").open, true, "alert evidence must open the collapsed brief");
 });
 
 test("an alert touch preserves the card until its click opens evidence", () => {
@@ -819,6 +837,35 @@ test("Rulebook rows expose stable alert destinations", () => {
   assert.equal(row.tabIndex, -1);
 });
 
+test("Rules keep configuration, applicability, and incomplete measurements distinct", () => {
+  reset();
+  assert.equal(stress.ruleGroupKey({ mode: "alert", status: "watch" }), "attention");
+  assert.equal(stress.ruleGroupKey({ mode: "track", status: "act" }), "monitor");
+  assert.equal(stress.ruleGroupKey({ mode: "track", status: "unknown" }), "unknown");
+  assert.equal(stress.ruleGroupKey({ status: "not_evaluated", reason: "earnings_not_applicable" }), "not_applicable");
+  assert.equal(stress.ruleGroupKey({ status: "not_evaluated", reason: "pnl_unavailable" }), "not_evaluated");
+  assert.equal(stress.ruleGroupKey({ mode: "off", status: "not_evaluated", reason: "rule_off" }), "off");
+  assert.equal(stress.ruleGroupKey({ mode: "alert", status: "act", reason: "rule_off" }), "attention", "a conflicting reason cannot hide an active result");
+  const monitoring = stress.ruleChecklistRow({ id: "monitor", title: "Cash reserve", mode: "track", status: "act", evidence: "Reserve is below its threshold." });
+  assert.equal(monitoring.classList.contains("neutral"), true);
+  assert.equal(byClass(monitoring, "rules-row__status")[0].textContent, "Act level");
+  assert.equal(byClass(monitoring, "rules-row__mode")[0].textContent, "Monitor only");
+  const unknown = stress.ruleChecklistRow({ id: "partial", title: "Exposure", mode: "alert", status: "unknown", observed: 17.3, threshold: 40, unit: "% NLV", evidence: "Exposure is incomplete because delta is missing." });
+  assert.equal(unknown.classList.contains("ok"), false);
+  assert.equal(byClass(unknown, "rules-row__status")[0].textContent, "Unknown");
+  assert.equal(byClass(unknown, "rules-row__meter").length, 0, "an incomplete result must not imply a valid progress-to-limit comparison");
+  const minimum = stress.ruleChecklistRow({
+    id: "minimum", title: "Exposure", mode: "alert", status: "act", observed: 42, observed_is_lower_bound: true,
+    threshold: 40, unit: "% NLV", evidence: "At least 42% of NLV; some deltas are missing.",
+    offenders: [{ symbol: "SYN" }, { symbol: "ALT" }, { symbol: "THR" }, { symbol: "FOUR" }],
+    exempt: [{ symbol: "EXEMPT", note: "Exact-contract exemption." }], notes: ["Partial inputs remain incomplete."],
+  });
+  assert.match(minimum.textContent, /Observed minimum≥ 42(?:\.0+)?% NLV/);
+  assert.match(minimum.textContent, /FOUR/);
+  assert.match(minimum.textContent, /Exact-contract exemption/);
+  assert.match(minimum.textContent, /Partial inputs remain incomplete/);
+});
+
 test("unconfirmed red market clusters render as provisional amber", () => {
   const credit = stress.REGIME_CLUSTERS.find((cluster) => cluster.key === "credit");
   const market = {
@@ -861,6 +908,10 @@ test("healthy lamp-test line hides and a served source fault reveals it", () => 
   const snap = { updated_at: "2026-08-12T05:00:00Z", regime: { source_health: [{ source: "gamma", status: "ok" }] } };
   stress.renderLampTest(snap, { source_health: [{ source: "positions", status: "ok" }] });
   assert.equal(dom.element("lampTest").hidden, true);
+
+  stress.renderLampTest(snap, { source_health: [{ source: "positions", status: "ok" }] }, "Dealer gamma assessment unavailable");
+  assert.equal(dom.element("lampTest").hidden, false, "an unavailable assessment remains visible even when source counters are healthy");
+  assert.match(dom.element("lampTestStamp").textContent, /Dealer gamma assessment unavailable/);
 
   snap.regime.source_health[0].status = "stale";
   stress.renderLampTest(snap, { source_health: [{ source: "positions", status: "ok" }] });
@@ -1201,7 +1252,7 @@ test("stale positions never render an empty clean book and retain nonempty rows 
   assert.match(dom.element("underlyingBookCount").textContent, /^1 last known/);
   assert.match(dom.element("underlyingBookStatus").textContent, /visible for reference/i);
   assert.match(dom.element("underlyingBookList").textContent, /SYN/);
-  assert.equal(dom.element("underlyingWinnerPnl").textContent, "--", "stale rows must not publish a clean or current P/L summary");
+  assert.equal(dom.element("underlyingWinnerPnl").textContent, "Unavailable", "stale rows must not publish a clean or current P/L summary");
 });
 
 test("TestAppJSProtectionFastPathKeepsHardMarketEventBlocker replacement re-evaluates current active blockers at preview and submit", () => {

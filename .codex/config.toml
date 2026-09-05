@@ -1,5 +1,6 @@
 # Project-scoped Codex settings for Canary.
 # Loaded only after this project is trusted by Codex.
+model = "gpt-6-astra"
 
 # Keep routine code work inside the checkout. Commands that need to install a
 # binary, mutate runtime state, or reach outside the workspace must cross the

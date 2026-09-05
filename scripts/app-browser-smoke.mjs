@@ -282,6 +282,25 @@ async function runRound4SyntheticSmoke() {
       settings: syntheticSettings,
     },
   };
+  bootstrap.snapshot.rules = {
+    enabled: true, status: "degraded", as_of: now, policy_id: "synthetic-rulebook", policy_version: "2",
+    rules: [
+      { id: "long_option_loss", number: 13, title: "Long option loss limit", mode: "alert", status: "watch", observed: 48, threshold: 40, unit: "% premium lost", evidence: "A long option has lost 48% of its premium; watch starts at 40%.", offenders: [{ symbol: "SYN", leg: "SYN synthetic option", note: "48% of premium lost." }] },
+      { id: "concentration", number: 1, title: "Exposure to one underlying", mode: "alert", status: "unknown", observed: 17.3, threshold: 40, unit: "% NLV", evidence: "Exposure is incomplete because option delta is missing." },
+      { id: "extrinsic_budget", number: 4, title: "Option time value at risk", mode: "alert", status: "unknown", evidence: "The underlying price needed to measure time value is missing." },
+      { id: "hedge_integrity", number: 12, title: "Index protection size", mode: "alert", status: "unknown", evidence: "Protection size cannot be measured without option delta." },
+      { id: "premium_position", number: 2, title: "Premium at risk in one option position", mode: "track", status: "act", observed: 12, observed_is_lower_bound: true, threshold: 5, unit: "% NLV", evidence: "At least 12% of NLV is paid premium; some inputs are incomplete." },
+      { id: "fx", number: 14, title: "Foreign-currency exposure", mode: "track", status: "info", evidence: "Foreign-currency exposure is above its tracking level." },
+      { id: "cash", number: 3, title: "Cash reserve", mode: "alert", status: "pass", observed: 80, threshold: 75, unit: "% NLV", evidence: "Cash reserve exceeds the configured minimum." },
+      { id: "expiry", number: 5, title: "Options nearing expiry", mode: "alert", status: "watch", observed: 2, threshold: 5, unit: "DTE", evidence: "An option has fewer days remaining than the reference threshold." },
+      { id: "earnings_timing", number: 6, title: "Earnings timing", mode: "track", status: "not_evaluated", reason: "earnings_not_applicable", evidence: "Issuer earnings do not apply to the evaluated contracts.", exempt: [{ symbol: "SYN", note: "Broker-proven nonissuer." }] },
+      { id: "earnings_short", number: 7, title: "Short options held through earnings", mode: "alert", status: "not_evaluated", reason: "earnings_not_applicable", evidence: "Issuer earnings do not apply to the evaluated contracts." },
+      { id: "earnings_size", number: 8, title: "Position size near earnings", mode: "track", status: "pass", evidence: "No position exceeds the configured level." },
+      { id: "divergence", number: 9, title: "Holding falls while the market rises", mode: "off", status: "not_evaluated", reason: "rule_off", evidence: "Turned off in the Rulebook policy." },
+      { id: "winner", number: 10, title: "Large winner today", mode: "alert", status: "not_evaluated", reason: "pnl_unavailable", evidence: "Daily P/L is unavailable." },
+      { id: "positive_risk", number: 11, title: "Positive day with urgent risks open", mode: "off", status: "not_evaluated", reason: "rule_off", evidence: "Turned off in the Rulebook policy." },
+    ],
+  };
   withRegimeInsights(bootstrap.snapshot, now);
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -476,10 +495,34 @@ async function runRound4SyntheticSmoke() {
       remote: localStorage.getItem("ibkrRemoteRoute") || "",
       workspaceHeadings: [...document.querySelectorAll(".workspace-heading")].map((heading) => ({
         tab: heading.closest("[data-tab-panel]")?.getAttribute("data-tab-panel") || "",
-        overline: heading.querySelector(".workspace-heading__overline > span:first-child")?.textContent?.trim() || "",
         title: heading.querySelector("h2")?.textContent?.trim() || "",
       })),
     }));
+    const initialViewport = page.viewportSize();
+    await assertNoViewportOverflow(page);
+    await page.setViewportSize(initialViewport);
+    const rulesCard = await exerciseRulesCard(page);
+    await page.locator("#stressRulesCard").click();
+    const ruleTransition = await page.evaluate(async () => {
+      const { renderRulesCard } = await import("/stress.js");
+      const { state } = await import("/state.js");
+      const original = state.snapshot.rules;
+      const updated = structuredClone(original);
+      const changed = updated.rules.find((rule) => rule.mode === "alert" && rule.status === "watch");
+      const findRow = () => [...document.querySelectorAll("#stressRulesGrid .rules-row")].find((el) => el.dataset.ruleId === changed.id);
+      const before = findRow();
+      before.closest(".rules-group").open = true;
+      before.open = true;
+      before.querySelector("summary").focus();
+      changed.status = "pass";
+      renderRulesCard(updated);
+      const after = findRow();
+      const kept = after.open && after.closest(".rules-group").open && document.activeElement === after.querySelector("summary");
+      renderRulesCard(original);
+      return kept;
+    });
+    if (!ruleTransition) throw new Error("focused rule became inaccessible after moving from Watch to Pass");
+    await page.locator("#rulesSheetClose").click();
     await page.locator("#regimeDetailToggle").click();
     const regimeDetail = await page.locator("#regimeIndicators").innerText();
     for (const expected of ["SPX · positioning context", "context_only for this snapshot", "0dte: short gamma", "1to7: unavailable", "term: long gamma", "richer downside protection", "positioning is unknown"]) {
@@ -559,6 +602,9 @@ async function runRound4SyntheticSmoke() {
       horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     }));
     if (!edgeView.learning.includes("Same decisions") || !edgeView.cycles.includes("SYN CALL")) throw new Error("Edge learning evidence did not render");
+    await page.locator(".edge-analysis > summary").click();
+    if (!await page.locator(".edge-analysis .edge-matrix-note").isVisible()) throw new Error("Horizon comparisons must show their different-samples qualification");
+    await page.locator(".edge-analysis > summary").click();
     const edgeDetailRead = page.waitForResponse((response) => {
       if (response.request().method() !== "GET") return false;
       const url = new URL(response.url());
@@ -594,6 +640,12 @@ async function runRound4SyntheticSmoke() {
     }));
     await page.locator("#tabMonitor").click();
     await page.waitForFunction(() => document.getElementById("dashboard")?.hidden === false, { timeout: 5000 });
+    await page.evaluate(async () => {
+      const { openAlertEvidence } = await import("/alert-inbox.js");
+      openAlertEvidence({ presentation_code: "risk_policy_drawdown_latched" });
+    });
+    if (!await page.locator("#briefSections").isVisible()) throw new Error("Alert navigation must disclose its brief evidence");
+    await page.locator("#briefDisclosure > summary").click();
     const briefView = await page.evaluate(() => ({
       narrative: document.getElementById("briefSections")?.classList.contains("brief-sections--narrative") === true,
       text: document.getElementById("briefSections")?.textContent || "",
@@ -649,24 +701,24 @@ async function runRound4SyntheticSmoke() {
     }));
     if (!monitor.active || monitor.badge !== "1" || monitor.label !== "Alerts, 1 open" || monitor.route !== "/" || monitor.remote !== "synthetic-route") throw new Error(`synthetic unread/pairing recovery state failed: ${JSON.stringify(monitor)}`);
     if (JSON.stringify(monitor.workspaceHeadings) !== JSON.stringify([
-      { tab: "monitor", overline: "Market desk", title: "Monitor" },
-      { tab: "positions", overline: "Live book", title: "Positions" },
-      { tab: "edge", overline: "Broker-truth review", title: "Edge" },
-      { tab: "alerts", overline: "Attention queue", title: "Alerts" },
-      { tab: "orders", overline: "Order journal", title: "Orders" },
-      { tab: "settings", overline: "Control panel", title: "Settings" },
+      { tab: "monitor", title: "Monitor" },
+      { tab: "positions", title: "Positions" },
+      { tab: "edge", title: "Edge" },
+      { tab: "alerts", title: "Alerts" },
+      { tab: "orders", title: "Orders" },
+      { tab: "settings", title: "Settings" },
     ])) throw new Error(`workspace heading hierarchy drifted: ${JSON.stringify(monitor.workspaceHeadings)}`);
     if (update.text !== "v3.0.2 available · Update" || !update.enabled || !update.visible || update.horizontal_overflow) throw new Error(`synthetic update footer failed: ${JSON.stringify(update)}`);
     if (!alertsView.activeAlerts.includes("Synthetic watch") || alertsView.authority !== "Active") throw new Error(`synthetic Alerts state failed: ${JSON.stringify(alertsView)}`);
     if (alertsView.litTiles !== 1 || !alertsView.authoritySeated) throw new Error(`synthetic annunciator log failed: ${JSON.stringify(alertsView)}`);
     if (JSON.stringify(settings.modes) !== JSON.stringify(["Off", "Action required", "Watch + action"]) || !settings.copy.includes("global for this app host and all paired devices") || !settings.copy.includes("Off stops phone notifications while current alerts remain visible") || !settings.copy.includes("Action required sends urgent items only") || !settings.copy.includes("Watch + action also sends review reminders") || !settings.copy.includes("not configured here") || !settings.copy.includes("shared across paired devices") || settings.pushState !== "unsupported" || settings.dateFormat !== "us_weekday" || JSON.stringify(settings.dateOptions) !== JSON.stringify(["us", "eu", "us_weekday", "eu_weekday"])) throw new Error(`synthetic Settings state failed: ${JSON.stringify(settings)}`);
-    if (!edgeView.active || edgeReads !== 3 || edgeView.status || edgeView.account !== "******" || edgeView.headline !== "Reveal account values to view the monetary headline." || edgeView.matrixRows !== 5 || edgeView.findings !== 3 || !edgeView.findingText.includes("GAMMA") || !edgeView.findingText.includes("-18.30%") || !edgeView.findingText.includes("******") || edgeView.options !== 3 || edgeView.realizedOptions !== 2 || edgeView.openOptions !== 1 || !edgeView.optionText.includes("Exact Order") || !edgeView.optionText.includes("Open position") || !edgeView.optionText.includes("******") || !edgeView.optionCoverage.includes("opening-only zero-P/L") || !edgeView.methodCollapsed || edgeView.explanationButtons !== 6 || !edgeView.explanationOnly || !edgeView.controlsAbsent || !edgeView.decisionFirst || edgeView.horizontalOverflow) {
+    if (!edgeView.active || edgeReads !== 3 || edgeView.status || edgeView.account !== "******" || edgeView.headline !== "Account values hidden" || edgeView.matrixRows !== 5 || edgeView.findings !== 3 || !edgeView.findingText.includes("GAMMA") || !edgeView.findingText.includes("-18.30%") || !edgeView.findingText.includes("******") || edgeView.options !== 3 || edgeView.realizedOptions !== 2 || edgeView.openOptions !== 1 || !edgeView.optionText.includes("Exact Order") || !edgeView.optionText.includes("Open position") || !edgeView.optionText.includes("******") || !edgeView.optionCoverage.includes("opening-only zero-P/L") || !edgeView.methodCollapsed || edgeView.explanationButtons !== 6 || !edgeView.explanationOnly || !edgeView.controlsAbsent || !edgeView.decisionFirst || edgeView.horizontalOverflow) {
       throw new Error(`synthetic Edge rendered state failed: ${JSON.stringify({ edgeReads, edgeView })}`);
     }
-    if (edgeDetailView.title !== "GAMMA · Add decision" || !edgeDetailView.summary.includes("30 → 45") || !edgeDetailView.summary.includes("$55.00") || !edgeDetailView.summary.includes("$1.00") || edgeDetailView.scoreCount !== 3 || !edgeDetailView.scores.includes("-$151.00 · -18.30%") || edgeDetailView.expanded !== "true" || edgeDetailView.horizontalOverflow) {
+    if (edgeDetailView.title !== "GAMMA · Add decision" || !edgeDetailView.summary.includes("30 → 45") || !edgeDetailView.summary.includes("$55.00") || !edgeDetailView.summary.includes("$1.00") || edgeDetailView.scoreCount !== 3 || !/-(?:US)?\$151\.00 · -18\.30%/.test(edgeDetailView.scores) || edgeDetailView.expanded !== "true" || edgeDetailView.horizontalOverflow) {
       throw new Error(`synthetic Edge calculation trail failed: ${JSON.stringify(edgeDetailView)}`);
     }
-    if (edgeOptionView.title !== "APEX · Closing episode" || !edgeOptionView.summary.includes("Broker realized P/L+$90.00") || edgeOptionView.legCount !== 2 || !edgeOptionView.legs.includes("qty 1") || !edgeOptionView.legs.includes("at $3.00") || !edgeOptionView.legs.includes("Costs +$1.00") || edgeOptionView.expanded !== "true" || edgeOptionView.horizontalOverflow) {
+    if (edgeOptionView.title !== "APEX · Closing episode" || !/Broker realized P\/L\+(?:US)?\$90\.00/.test(edgeOptionView.summary) || edgeOptionView.legCount !== 2 || !edgeOptionView.legs.includes("qty 1") || !/at (?:US)?\$3\.00/.test(edgeOptionView.legs) || !/Costs \+(?:US)?\$1\.00/.test(edgeOptionView.legs) || edgeOptionView.expanded !== "true" || edgeOptionView.horizontalOverflow) {
       throw new Error(`synthetic Edge option trail failed: ${JSON.stringify(edgeOptionView)}`);
     }
     if (!briefView.narrative || !briefView.text.includes("Synthetic desk ready.") || !briefView.text.includes("No account-derived data was loaded.") || briefView.accountText !== "Account unresolved" || !briefView.sessionBridge.startsWith("Monday's close → next open")) throw new Error(`synthetic Brief state failed: ${JSON.stringify(briefView)}`);
@@ -754,7 +806,7 @@ async function runRound4SyntheticSmoke() {
     }
     if (externalRequests.length > 0) throw new Error(`synthetic browser attempted external requests: ${JSON.stringify(externalRequests)}`);
     if (errors.length > 0) throw new Error(`synthetic browser errors: ${errors.join("\n")}`);
-    console.log(JSON.stringify({ ok: true, browser: browserName, mobile: true, isolated: true, synthetic_only: true, external_requests: 0, pairing: { expired_fallback: true, fresh_pairing: true, attempts: pairingAttempts }, monitor, update, brief: briefView, alerts: alertsView, edge: edgeView, orders: ordersView, strategies: { grouped: strategyBefore, preview: strategyAfter, submit_clicked: false }, desktop_layout: desktopLayout, settings, reload, auth_recovery: { device_cookie: true, session_reissued: true }, bootstrap_requests: bootstrapRequests, intercepted_mutations: mutationRequests.map(({ method, path }) => ({ method, path })) }, null, 2));
+    console.log(JSON.stringify({ ok: true, browser: browserName, mobile: true, isolated: true, synthetic_only: true, external_requests: 0, pairing: { expired_fallback: true, fresh_pairing: true, attempts: pairingAttempts }, monitor, rules: rulesCard, update, brief: briefView, alerts: alertsView, edge: edgeView, orders: ordersView, strategies: { grouped: strategyBefore, preview: strategyAfter, submit_clicked: false }, desktop_layout: desktopLayout, settings, reload, auth_recovery: { device_cookie: true, session_reissued: true }, bootstrap_requests: bootstrapRequests, intercepted_mutations: mutationRequests.map(({ method, path }) => ({ method, path })) }, null, 2));
   } finally {
     await browser.close();
   }
@@ -1457,6 +1509,7 @@ async function exerciseMarketLayout(page) {
 
 async function assertNoViewportOverflow(page) {
   const sizes = [
+    { width: 320, height: 740 },
     { width: 390, height: 844 },
     { width: 547, height: 919 },
     { width: 900, height: 900 },
@@ -1491,7 +1544,7 @@ async function assertNoViewportOverflow(page) {
         masterFullWidth: !!(master && regimeGrid) && Math.abs(master.width - regimeGrid.width) <= 4,
         masterHeight: master ? Math.round(master.height) : 0,
         masterAboveGrid: !!master && master.top < regimeTiles[0].top,
-        regimeBeforeDesk: !!stress && regimeTiles[0].top < stress.top,
+        deskBeforeRegime: !!stress && stress.top < regimeTiles[0].top,
         signalPanelFullWidth: !!(signalPanel && dashboard) && Math.abs(signalPanel.width - dashboard.width) <= 4,
       } : null;
       const offenders = [...document.querySelectorAll("body *")]
@@ -1523,13 +1576,13 @@ async function assertNoViewportOverflow(page) {
       throw new Error(`page overflows at ${size.width}px: ${JSON.stringify(info)}`);
     }
     const layout = info.signalLayout;
-    if (!layout || layout.regimeTiles !== 6 || layout.regimeColumns !== 3 || layout.deskTiles < 3 || layout.deskColumns !== 2) {
-      throw new Error(`Regime should render a fixed 3x2 cluster grid (one window per daemon cluster) and Desk a two-column window grid at ${size.width}px: ${JSON.stringify(layout)}`);
+    if (!layout || layout.regimeTiles !== 6 || layout.regimeColumns !== 1 || layout.deskTiles < 3 || layout.deskColumns !== 1) {
+      throw new Error(`Regime should render a readable list of six market conditions (one window per daemon cluster) and portfolio attention a readable list at ${size.width}px: ${JSON.stringify(layout)}`);
     }
-    if (!layout.masterFullWidth || !layout.masterAboveGrid || !layout.regimeBeforeDesk || !layout.signalPanelFullWidth) {
-      throw new Error(`Master annunciator should span a full-width combined panel above the regime grid, with the desk grid beneath, at ${size.width}px: ${JSON.stringify(layout)}`);
+    if (!layout.masterFullWidth || !layout.masterAboveGrid || !layout.deskBeforeRegime || !layout.signalPanelFullWidth) {
+      throw new Error(`Master annunciator should span a full-width combined panel above the regime grid, with portfolio attention preceding supporting market conditions, at ${size.width}px: ${JSON.stringify(layout)}`);
     }
-		if (layout.masterHeight > 96) {
+		if (layout.masterHeight > 240) {
 		  throw new Error(`Master annunciator should remain a compact hierarchy signal at ${size.width}px: ${JSON.stringify(layout)}`);
 		}
 		if (info.marketSelectWidth > 52 || info.usOptionsLabel !== "US opt.") {
@@ -1723,28 +1776,43 @@ async function exerciseRulesCard(page) {
   await page.waitForFunction(() => {
     const panel = document.getElementById("stressRulesDetailPanel");
     return Boolean(document.getElementById("rulesSheet")?.open) && panel && !panel.hidden &&
-      (document.getElementById("stressRulesGrid")?.children.length || 0) >= 12;
+      (document.querySelectorAll("#stressRulesGrid .rules-row").length || 0) >= 12;
   }, { timeout: 5000 });
   const grid = await page.evaluate(() => {
-    const cards = [...(document.getElementById("stressRulesGrid")?.children || [])];
+    const cards = [...document.querySelectorAll("#stressRulesGrid .rules-row")];
     return {
       cards: cards.length,
       tally: document.getElementById("rulesSheetTally")?.textContent?.trim() || "",
-      leaders: cards.filter((c) => c.querySelector(".rules-row__leader")).length,
-      unknown_as_pass: cards.some((c) => /unknown/i.test(c.textContent || "") && c.classList.contains("ok")),
+      disclosures: cards.filter((c) => c.tagName === "DETAILS" && c.querySelector(".rules-row__detail")).length,
+      unknown_as_pass: cards.some((c) => c.dataset.ruleStatus === "unknown" && c.classList.contains("ok")),
+      monitor_as_alert: cards.some((c) => c.dataset.ruleMode === "track" && (c.classList.contains("warn") || c.classList.contains("risk"))),
     };
   });
   if (grid.unknown_as_pass) {
     throw new Error("a rules row renders unknown status with a pass tone — unknown must never read as pass");
   }
-  if (grid.leaders !== grid.cards) {
-    throw new Error(`every rules row should render as a dot-leader checklist line: ${JSON.stringify(grid)}`);
+  if (grid.monitor_as_alert || grid.disclosures !== grid.cards) {
+    throw new Error(`rules must expose full evidence and retain neutral monitor-only states: ${JSON.stringify(grid)}`);
   }
   if (!grid.tally || grid.tally === "--") {
     throw new Error(`rules sheet should open on the served breach tally: ${JSON.stringify(grid)}`);
   }
-  await page.locator("#stressRulesToggle").click();
-  await page.waitForFunction(() => document.getElementById("stressRulesDetailPanel")?.hidden, { timeout: 5000 });
+  const firstGroup = page.locator("#stressRulesGrid .rules-group").first();
+  if (!(await firstGroup.evaluate((el) => el.open))) await firstGroup.locator(".rules-group__heading").click();
+  const firstRule = firstGroup.locator(".rules-row").first();
+  if (!(await firstRule.evaluate((el) => el.open))) await firstRule.locator(".rules-row__line").click();
+  await firstRule.locator(".rules-row__evidence").waitFor({ state: "visible" });
+  await firstRule.locator(".rules-row__line").focus();
+  const disclosureState = await page.evaluate(async () => {
+    const { renderRulesCard } = await import("/stress.js");
+    const { state } = await import("/state.js");
+    const first = document.querySelector("#stressRulesGrid .rules-group[open] .rules-row[open]");
+    const id = first?.dataset.ruleId;
+    renderRulesCard(state.snapshot?.rules);
+    const row = [...document.querySelectorAll("#stressRulesGrid .rules-row")].find((el) => el.dataset.ruleId === id);
+    return Boolean(row?.open && row.closest(".rules-group")?.open && document.activeElement === row.querySelector("summary"));
+  });
+  if (!disclosureState) throw new Error("rule evidence or keyboard focus was lost during a snapshot render");
   await page.locator("#rulesSheetClose").click();
   await page.waitForFunction(() => !document.getElementById("rulesSheet")?.open, { timeout: 5000 });
   return { exercised: true, counts, cards: grid.cards, tally: grid.tally };
@@ -2363,9 +2431,9 @@ async function exerciseAlerts(page) {
   if (!info.placards.includes("Open") || info.placards.includes("Process evidence")) {
     throw new Error(`alerts placards are incomplete or carry relocated sections: ${JSON.stringify(info.placards)}`);
   }
-  // The ALL DARK poster is the count; every other state keeps the legend.
-  if (info.activeLegendHidden !== (info.poster === "ALL DARK.")) {
-    throw new Error(`the Active legend must yield to the poster and only to the poster: ${JSON.stringify({ poster: info.poster, activeLegendHidden: info.activeLegendHidden })}`);
+  // Only current alert rows need an additional open-count legend.
+  if (info.activeLegendHidden !== (info.currentRows === 0)) {
+    throw new Error(`the count row must be hidden when no current alert count can be asserted: ${JSON.stringify({ poster: info.poster, activeLegendHidden: info.activeLegendHidden })}`);
   }
   if (info.terminalSectionPresent) throw new Error("terminal alert history must not be rendered in v3");
   if (!initiallyOpen) {
@@ -2566,7 +2634,7 @@ async function exerciseOpenOrders(page) {
       checkedCopy: document.getElementById("ordersAsOf")?.textContent?.trim() || "",
       countText: document.getElementById("ordersOpenCount")?.textContent?.trim() || "",
       rows: document.querySelectorAll("#ordersOpenList .open-order-row").length,
-      empty: document.getElementById("ordersOpenList")?.textContent?.includes("None working.") || false,
+      empty: document.getElementById("ordersOpenTitle")?.textContent === "No open orders",
       // Panel Dark order bars: every row is a machined tile carrying an
       bars: document.querySelectorAll("#ordersOpenList .open-order-row.pd-tile.pd-order").length,
       legends: [...document.querySelectorAll("#ordersOpenList .open-order-row .pd-tile__legend")].map((el) => el.textContent?.trim() || ""),

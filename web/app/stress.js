@@ -1,7 +1,7 @@
 import { stressProtectionCoverageFor, protectionCoverageBaseCurrency, protectionCoverageHasData, protectionCoverageHeadline, protectionCoverageLargestText, protectionCoverageStaleText } from "./protection-coverage.js";
 import { unknownEventRuleNote } from "./earnings-relevance.js";
 import { earningsApplicabilitySummary, earningsHealthNotes, ruleStatusLabel, wshEntitlementNotice } from "./rules-presentation.js";
-import { $, cleanDetail, firstNumber, labelize, normalizeSymbol, numberRead, parseDate, pct, quoteTimestamp, renderFreshnessTimestamp, shortTimeWithZone, signedClass, signedPct, wholePct } from "./shared.js";
+import { $, calendarDate, cleanDetail, firstNumber, labelize, normalizeSymbol, numberRead, parseDate, pct, quoteTimestamp, renderFreshnessTimestamp, shortTimeWithZone, signedClass, signedPct, wholePct } from "./shared.js";
 import { state } from "./state.js";
 
 const RULE_TONES = { act: "risk", watch: "warn", pass: "ok", info: "neutral", unknown: "neutral", not_evaluated: "neutral" };
@@ -11,15 +11,7 @@ function ruleTone(status, mode = "alert") {
   return RULE_TONES[status] || "neutral";
 }
 
-function trackedRuleStatus(status, reason = "") {
-  if (status === "pass") return "within level";
-  if (status === "watch" || status === "act") return "above level";
-  if (status === "unknown") return "waiting for input";
-  return ruleStatusLabel(status, reason);
-}
-
-// Rules card: advisory 14-rule daily checklist from snapshot.rules
-// grid shows all rows. Read-only by design — no order actions here.
+// Rule mode, result, and missing evidence remain separate on both surfaces.
 function renderRulesCard(rules) {
   const card = $("stressRulesCard");
   const strip = $("stressRulesStrip");
@@ -35,30 +27,19 @@ function renderRulesCard(rules) {
   }
   card.hidden = false;
   strip.hidden = false;
-  $("stressRulesCounts").textContent = rulesTileFigure(rules);
-  // The sheet opens on its own tally: the same served breach_counts figure
-  if (tally) tally.textContent = rulesTileFigure(rules);
+  $("stressRulesCounts").replaceChildren(...rulesTileFigure(rules).split(" · ").map((text) => {
+    const fact = document.createElement("span");
+    fact.className = "desk-evidence-fact";
+    fact.textContent = text;
+    return fact;
+  }));
+  if (tally) tally.textContent = `${rules.rules.length} rules`;
   renderRulesProvenance(rules);
 
   const order = Array.isArray(rules.ranked) && rules.ranked.length === rules.rules.length
     ? rules.ranked
     : rules.rules.map((_, i) => i);
   renderRulesTileState(rules, order);
-  const brief = $("stressRulesBrief");
-  brief.replaceChildren();
-  let shown = 0;
-  for (const ix of order) {
-    const r = rules.rules[ix];
-    if (!r || r.status === "pass") continue;
-    if (shown >= 3) break;
-    shown++;
-    const pill = document.createElement("span");
-    pill.className = `severity-pill stress-rules__pill ${ruleTone(r.status, r.mode)}`;
-    const stateLabel = r.mode === "track" ? `Track · ${trackedRuleStatus(r.status, r.reason)}` : r.mode === "off" ? "Off" : ruleStatusLabel(r.status, r.reason);
-    pill.textContent = `${r.number} · ${r.title} · ${stateLabel}`;
-    pill.title = r.evidence || "";
-    brief.appendChild(pill);
-  }
   const noteParts = [];
   const eventNote = unknownEventRuleNote(rules);
   if (eventNote) noteParts.push(eventNote);
@@ -74,9 +55,6 @@ function renderRulesCard(rules) {
   }
   renderRulesNotes(noteParts, Boolean(eventNote));
 
-  const button = $("stressRulesToggle");
-  button.setAttribute("aria-expanded", state.rulesDetailOpen ? "true" : "false");
-  button.textContent = state.rulesDetailOpen ? "Hide rules" : "Show rules";
   detail.hidden = !state.rulesDetailOpen;
   if (state.rulesDetailOpen) {
     renderRulesGrid(rules, order);
@@ -98,9 +76,21 @@ function renderRulesProvenance(rules = {}) {
     parts.push(v && id.toLowerCase().endsWith(v.toLowerCase()) ? name : `${name}${v ? ` ${v}` : ""}`);
   }
   const at = parseDate(rules.as_of);
-  if (at) parts.push(`evaluated ${shortTimeWithZone(at.toISOString())}`);
+  const evaluated = $("rulesSheetEvaluated");
+  if (evaluated) {
+    const clock = at?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false, timeZoneName: "short" });
+    const day = at && at.toDateString() !== new Date().toDateString() ? `${calendarDate(at.toISOString())} · ` : "";
+    evaluated.textContent = at ? `Evaluated ${day}${clock}` : "Evaluation time unavailable";
+  }
+  if (at) parts.push(`${calendarDate(at.toISOString())} · ${shortTimeWithZone(at.toISOString())}`);
   el.hidden = parts.length === 0;
   el.textContent = parts.join(" · ");
+  const source = $("rulesSheetSource");
+  if (source) {
+    const fault = sourceTransportFault(state.snapshot || {}, "rules");
+    source.hidden = !fault;
+    source.textContent = fault ? `${faultCaption(fault)} · showing the last available rule evaluation. ${fault.reason || ""}` : "";
+  }
 }
 
 // The tile figure keeps notification policy separate from findings and data
@@ -166,107 +156,189 @@ function renderRulesNotes(parts, attention) {
   }));
 }
 
-// The Rules sheet is a checklist, not a card deck: one dot-leader line per
-// dot so it never reads as a breach. One element per rule, keeping the tone
-// class, so "unknown" can still never render with the pass tone.
+const RULE_GROUPS = [
+  ["attention", "Needs attention", true],
+  ["unknown", "Cannot evaluate", true],
+  ["monitor", "Monitor only", true],
+  ["info", "Information", false],
+  ["pass", "Pass", false],
+  ["not_applicable", "Not applicable", false],
+  ["not_evaluated", "Not evaluated", false],
+  ["off", "Off", false],
+];
+
+function ruleGroupKey(rule) {
+  if (rule.mode === "off" || (rule.status === "not_evaluated" && rule.reason === "rule_off")) return "off";
+  if (rule.status === "unknown") return "unknown";
+  if (rule.status === "not_evaluated") {
+    return ["broker_nonissuer", "terminal_non_reporting", "earnings_not_applicable"].includes(rule.reason)
+      ? "not_applicable" : "not_evaluated";
+  }
+  if (rule.status === "pass") return "pass";
+  if (rule.mode === "track") return "monitor";
+  if (["act", "watch"].includes(rule.status)) return "attention";
+  return "info";
+}
+
+function ruleChecklistStatus(rule) {
+  if (rule.mode === "off") return "Off";
+  if (ruleGroupKey(rule) === "not_applicable") return "Not applicable";
+  if (rule.mode === "track" && ["watch", "act"].includes(rule.status)) return `${labelize(rule.status)} level`;
+  return labelize(ruleStatusLabel(rule.status, rule.reason));
+}
+
+// Preserve daemon ranking within each result group and disclosure state across
+// snapshot refreshes. An alert destination opens its group and full evidence.
 function renderRulesGrid(rules, order) {
   const grid = $("stressRulesGrid");
   if (!grid) return;
-  const rows = [];
-  for (const ix of order) {
-    const r = rules.rules[ix];
-    if (!r) continue;
-    rows.push(ruleChecklistRow(r));
+  const focused = grid.contains?.(document.activeElement) ? document.activeElement : null;
+  const focusedRule = focused?.closest?.("[data-rule-id]")?.dataset.ruleId;
+  const focusedGroup = focused?.closest?.("[data-rule-group]")?.dataset.ruleGroup;
+  const focusedSummary = focused?.tagName === "SUMMARY";
+  const groupOpen = new Map(Array.from(grid.querySelectorAll?.("[data-rule-group]") || []).map((el) => [el.dataset.ruleGroup, el.open]));
+  const rowOpen = new Map(Array.from(grid.querySelectorAll?.("[data-rule-id]") || []).map((el) => [el.dataset.ruleId, el.open]));
+  const ranked = order.map((ix) => rules.rules[ix]).filter(Boolean);
+  const sections = [];
+  for (const [key, title, expanded] of RULE_GROUPS) {
+    const rows = ranked.filter((rule) => ruleGroupKey(rule) === key);
+    if (!rows.length) continue;
+    const section = document.createElement("details");
+    section.className = "rules-group";
+    section.dataset.ruleGroup = key;
+    const hasTarget = rows.some((rule) => state.alertEvidenceTarget?.kind === "rule" && state.alertEvidenceTarget.id === String(rule.id));
+    section.open = groupOpen.get(key) ?? (expanded || hasTarget);
+    const heading = document.createElement("summary");
+    heading.className = "rules-group__heading";
+    const label = document.createElement("span");
+    label.textContent = title;
+    const count = document.createElement("span");
+    count.className = "rules-group__count";
+    count.textContent = String(rows.length);
+    heading.append(label, count);
+    section.append(heading);
+    if (key === "monitor") {
+      const note = document.createElement("p");
+      note.className = "rules-group__note";
+      note.textContent = "No rule alerts.";
+      section.append(note);
+    }
+    const list = document.createElement("div");
+    list.className = "rules-group__list";
+    for (const rule of rows) {
+      const row = ruleChecklistRow(rule);
+      row.open = rowOpen.get(String(rule.id || "")) ?? row.open;
+      list.append(row);
+    }
+    section.append(list);
+    sections.push(section);
   }
-  grid.replaceChildren(...rows);
+  grid.replaceChildren(...sections);
+  if (focused) {
+    const target = focusedRule !== undefined
+      ? Array.from(grid.querySelectorAll("[data-rule-id]")).find((el) => el.dataset.ruleId === focusedRule)
+      : Array.from(grid.querySelectorAll("[data-rule-group]")).find((el) => el.dataset.ruleGroup === focusedGroup);
+    if (focusedRule !== undefined) {
+      const group = target?.closest("[data-rule-group]");
+      if (group) group.open = true;
+    }
+    (focusedSummary ? target?.querySelector("summary") : target)?.focus({ preventScroll: true });
+  }
 }
 
 function ruleChecklistRow(r) {
   const status = String(r.status || "").toLowerCase();
-  const row = document.createElement("div");
-  row.className = `pd-row rules-row ${ruleTone(r.status, r.mode)}`;
+  const mode = r.mode || "alert";
+  const row = document.createElement("details");
+  row.className = `rules-row ${ruleTone(r.status, mode)}`;
   row.dataset.ruleId = String(r.id || "");
+  row.dataset.ruleStatus = status;
+  row.dataset.ruleMode = mode;
   row.tabIndex = -1;
   if (state.alertEvidenceTarget?.kind === "rule" && state.alertEvidenceTarget.id === row.dataset.ruleId) {
     row.classList.add("is-alert-evidence-target");
     row.setAttribute("aria-current", "location");
+    row.open = true;
   }
-  if ((r.mode || "alert") === "alert" && (status === "act" || status === "watch")) row.classList.add(`rules-row--${status}`);
-  if (status === "info") row.classList.add("rules-row--info");
-  const line = document.createElement("span");
+  if (mode === "alert" && ["act", "watch"].includes(status)) row.classList.add(`rules-row--${status}`);
+  const line = document.createElement("summary");
   line.className = "rules-row__line";
-  const number = document.createElement("span");
-  number.className = "rules-row__number";
-  number.textContent = String(r.number ?? "--");
   const title = document.createElement("span");
   title.className = "rules-row__title";
   title.textContent = cleanDetail(r.title);
-  const leader = document.createElement("span");
-  leader.className = "rules-row__leader";
-  leader.setAttribute("aria-hidden", "true");
-  line.append(number, title, leader);
-  if (status === "info") {
-    const dot = document.createElement("i");
-    dot.className = "rules-row__dot";
-    dot.setAttribute("aria-hidden", "true");
-    line.append(dot);
-  }
-  if (status === "pass") {
-    const tick = document.createElement("i");
-    tick.className = "rules-row__tick";
-    tick.setAttribute("aria-hidden", "true");
-    line.append(tick);
-  }
+  const result = document.createElement("span");
+  result.className = "rules-row__result";
   const statusWord = document.createElement("b");
   statusWord.className = "rules-row__status";
-  statusWord.textContent = r.mode === "off" ? "off" : r.mode === "track" ? `track · ${trackedRuleStatus(r.status, r.reason)}` : ruleStatusLabel(r.status, r.reason);
-  line.append(statusWord);
+  statusWord.textContent = ruleChecklistStatus(r);
+  const modeLabel = document.createElement("span");
+  modeLabel.className = "rules-row__mode";
+  modeLabel.textContent = mode === "track" ? "Monitor only" : mode === "off" ? "Disabled" : "Alert mode";
+  result.append(statusWord, modeLabel);
+  line.append(title, result);
   row.append(line);
-  if (status !== "pass") {
-    const evidence = document.createElement("p");
-    evidence.className = "rules-row__evidence";
-    let text = r.evidence || "--";
-    if (typeof r.observed === "number" && typeof r.threshold === "number") {
-      text += ` (observed ${r.observed} vs ${r.threshold}${r.unit ? " " + r.unit : ""})`;
-    }
-    evidence.textContent = text;
-    row.append(evidence);
-    const meter = ruleMeasureMeter(r);
-    if (meter) row.append(meter);
-  }
-  const offenders = (r.offenders || []).slice(0, 3);
-  if (offenders.length) {
-    const list = document.createElement("p");
-    list.className = "stress-rules__offenders";
-    list.textContent = offenders.map((o) => (o.leg || o.symbol) + (o.note ? ` — ${o.note}` : "")).join(" · ");
-    row.append(list);
-  }
-  return row;
-}
 
-// ruleMeasureMeter draws observed against the rule's own served threshold: a
-// thin track scaled to max(2× threshold, observed), with a tick at the
-// threshold. It renders only served numbers — no invented policy — and only
-// for non-pass rows, so the sheet answers "how far past the line?" at a
-// glance without adding noise to clean rows.
-function ruleMeasureMeter(r = {}) {
-  const observed = r.observed;
-  const threshold = r.threshold;
-  if (typeof observed !== "number" || typeof threshold !== "number" || threshold <= 0 || observed < 0) return null;
-  const scale = Math.max(threshold * 2, observed * 1.05);
-  const meter = document.createElement("div");
-  meter.className = "rules-row__meter";
-  // The evidence line above already speaks the numbers; the meter is the
-  // picture of them, so screen readers must not hear the pair twice.
-  meter.setAttribute("aria-hidden", "true");
-  const fill = document.createElement("span");
-  fill.className = "rules-row__meter-fill";
-  fill.style.width = `${Math.min(100, (observed / scale) * 100)}%`;
-  const tick = document.createElement("span");
-  tick.className = "rules-row__meter-tick";
-  tick.style.left = `${(threshold / scale) * 100}%`;
-  meter.append(fill, tick);
-  return meter;
+  const body = document.createElement("div");
+  body.className = "rules-row__detail";
+  const evidence = document.createElement("p");
+  evidence.className = "rules-row__evidence";
+  evidence.textContent = (r.evidence || "No evidence was supplied for this rule.")
+    .replace(/\b1 long option position\(s\) have\b/g, "1 long option position has")
+    .replace(/\b(\d+) ((?:long option |material option |underlying )?)(position|exposure|contract)\(s\)/g,
+      (_, count, qualifier, noun) => `${count} ${qualifier}${noun}${Number(count) === 1 ? "" : "s"}`);
+  body.append(evidence);
+  // The contract has no comparator or complete band endpoints. Report the
+  // served values with their units and lower-bound qualifier, without a meter
+  // or an inferred direction of breach.
+  const facts = document.createElement("dl");
+  facts.className = "rules-row__facts";
+  for (const [label, value] of [
+    [r.observed_is_lower_bound ? "Observed minimum" : "Observed", r.observed],
+    ["Reference threshold", r.threshold],
+  ]) {
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const reading = document.createElement("dd");
+    const minimum = label === "Observed minimum" ? "≥ " : "";
+    const amount = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
+    reading.textContent = `${minimum}${amount}${r.unit ? (r.unit.startsWith("%") ? "" : " ") + r.unit : ""}`;
+    facts.append(term, reading);
+  }
+  if (facts.children.length) body.append(facts);
+  for (const [label, items] of [["Affected", r.offenders], ["Exempt", r.exempt]]) {
+    if (!Array.isArray(items) || !items.length) continue;
+    const heading = document.createElement("b");
+    heading.className = "rules-row__detail-label";
+    heading.textContent = `${label} · ${items.length}`;
+    const list = document.createElement("ul");
+    list.className = "rules-row__positions";
+    for (const item of items) {
+      const li = document.createElement("li");
+      const identity = document.createElement("span");
+      identity.textContent = item.leg || item.symbol || "Unspecified position";
+      li.append(identity);
+      if (item.note) {
+        const note = document.createElement("span");
+        note.textContent = item.note;
+        li.append(note);
+      }
+      list.append(li);
+    }
+    body.append(heading, list);
+  }
+  for (const text of r.notes || []) {
+    const note = document.createElement("p");
+    note.className = "rules-row__note";
+    note.textContent = text;
+    body.append(note);
+  }
+  const reference = document.createElement("p");
+  reference.className = "rules-row__reference";
+  reference.textContent = [`Rule ${r.number ?? "—"}`, r.status === "not_evaluated" ? ruleStatusLabel(r.status, r.reason) : ""].filter(Boolean).join(" · ");
+  body.append(reference);
+  row.append(body);
+  return row;
 }
 
 function renderStressDetail(stress, snap = state.snapshot || {}) {
@@ -720,12 +792,20 @@ function marketQuoteCell(symbol, quote, market, marketQuotes, marketCalendar) {
 
   const source = document.createElement("small");
   source.className = "market-quote-cell__source" + (error && !closed ? " error" : "");
-  source.textContent = error
+  const sourceText = error
     ? closed ? "Closed" : marketQuoteInterruptedLine(quote, marketQuotes, hasPrice)
     : marketQuoteSourceLine(quote, marketQuotes, fallback.source);
+  const parts = sourceText.split(" · ");
+  const at = /^\d{2}:\d{2}$/.test(parts.at(-1)) ? parts.pop() : "";
+  const qualification = document.createElement("span");
+  qualification.textContent = parts.join(" · ");
+  const timestamp = document.createElement("span");
+  timestamp.className = "market-quote-cell__time";
+  timestamp.textContent = at ? `\n${at}` : "";
+  source.append(qualification, timestamp);
   source.title = error
     ? closed ? "Selected market session is closed" : `${marketQuoteErrorLabel(error)}; ${hasPrice ? "showing last available quote" : "no frozen quote available yet"}`
-    : source.textContent;
+    : sourceText;
   cell.append(head, valueLine, source);
   return cell;
 }
@@ -793,16 +873,43 @@ function renderRegimePanel(snap) {
   const posture = regimePosture(snap, stress, market);
   const authority = regimeAuthorityView(snap);
   const regimeStatus = marketRegimeStatusLine(snap, stress, market, indicators);
-  $("marketRegime").textContent = regimeAuthorityLabel(posture, authority);
+  const label = regimeAuthorityLabel(posture, authority);
+  const parts = label.match(/^(Watch|Act|Urgent):\s*(.+)$/i);
+  const legend = $("marketRegime");
+  legend.setAttribute("aria-label", label);
+  if (parts) {
+    const status = document.createElement("span");
+    status.className = "pd-master__status";
+    status.textContent = parts[1] + "\n";
+    const headline = document.createElement("span");
+    headline.className = "pd-master__headline";
+    headline.textContent = parts[2].replace(/^[a-z]/, (letter) => letter.toUpperCase());
+    legend.replaceChildren(status, headline);
+  } else {
+    legend.textContent = label;
+  }
   const summary = $("marketRegimeSummary");
   const subline = masterSubline(snap, stress);
-  summary.textContent = subline;
-  // The subline clamps; its title keeps the full text plus the freshness or
-  // authority explanation behind it, so nothing disclosed here is truncated
+  const [primary, ...qualifiers] = subline.split(" · ");
+  const lead = document.createElement("span");
+  lead.textContent = primary;
+  summary.replaceChildren(lead);
+  if (qualifiers.length) {
+    const context = document.createElement("span");
+    context.className = "pd-master__context";
+    context.textContent = " · " + qualifiers.join(" · ");
+    summary.append(context);
+  }
+  // Keep the complete qualification visible and retain the additional source
+  // explanation in its title.
   summary.title = [subline, regimeStatus.title || regimeStatus.detail || regimeStatus.summary]
     .filter(Boolean).join(" — ");
   applyTileSeverity($("masterAnnunciator"), masterSeverity(snap, stress));
-  renderLampTest(snap, stress);
+  const unavailable = REGIME_CLUSTERS.filter((cluster) => regimeClusterBand(cluster, snap, stress) === "stale");
+  const assessment = unavailable.length > 0
+    ? `${unavailable.map((cluster) => cluster.legend).join(", ")} assessment unavailable`
+    : "";
+  renderLampTest(snap, stress, assessment);
   // marketRegimeMix now lives in the expanded detail deck and shows only the
   const governedNote = regimeGovernedNote(snap, market);
   const mixNote = $("marketRegimeMix");
@@ -872,7 +979,7 @@ function masterSubline(snap = {}, stress = {}) {
   const dataQualityDecision = masterDataQualityDecision(snap, stress, action, dark);
   // Action and severity often share a word ("Watch"/"watch"); printing both
   // reads as a stutter, so the severity only appears when it adds information.
-  const governed = regimeGovernedNote(snap, stress.market || {});
+  const governed = regimeGovernedNote(snap, stress.market || {}, true);
   const parts = dataQualityDecision
     ? [dataQualityDecision]
     : governed
@@ -883,12 +990,10 @@ function masterSubline(snap = {}, stress = {}) {
   // appear must still be named rather than silently dropped.
   const reds = offPanelRedClusters(stress);
   if (reds.length > 0) parts.push(`${reds.length} red: ${reds.join(", ")}`);
-  // A dead window under a quiet master is the same silent disagreement as a
-  if (!dataQualityDecision && dark.length > 0) {
-    parts.push(`${dark.map((cluster) => cluster.legend.toLowerCase()).join(", ")} dark`);
-  }
+  // Unavailable assessments stay visible in the adjacent source row. Keep
+  // warning timing beside the signal it qualifies, separate from input health.
   const timing = cleanDetail(snap.regime?.lifecycle?.timing);
-  if (!dataQualityDecision && timing !== "--") parts.push(labelize(timing).toLowerCase());
+  if (!dataQualityDecision && timing !== "--") parts.unshift(timing === "forward warning" ? "Advance warning" : labelize(timing));
   return parts.filter(Boolean).join(" · ");
 }
 
@@ -926,12 +1031,12 @@ function offPanelRedClusters(stress = {}) {
 // The lamp test is the panel's own self-report: how many served feeds are
 // stress source-health entries (the instrument's feeds); app-transport
 // failures are named as faults but never silently change the feed count.
-function renderLampTest(snap = {}, stress = {}) {
+function renderLampTest(snap = {}, stress = {}, assessment = "") {
   const stamp = $("lampTestStamp");
   const line = $("lampTest");
   if (!stamp || !line) return;
   const health = lampTestSources(snap, stress);
-  line.hidden = health.faults.length === 0 && health.inherited.length === 0;
+  line.hidden = !assessment && health.faults.length === 0 && health.inherited.length === 0;
   if (line.hidden) {
     const dialog = $("lampTestDialog");
     if (dialog?.open) dialog.close();
@@ -940,19 +1045,19 @@ function renderLampTest(snap = {}, stress = {}) {
   const when = at ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : "--";
   stamp.replaceChildren();
   const lead = document.createElement("span");
-  lead.textContent = `Last snapshot ${when} · `;
+  lead.textContent = ` · Snapshot ${when}`;
   const count = document.createElement("b");
   count.className = health.faults.length > 0 ? "pd-dimcount" : "";
   count.textContent = `${health.ok}/${health.total} sources ok`;
-  stamp.append(lead, count);
-  const noteParts = health.faults.length > 0 ? health.faults : health.inherited;
+  stamp.append(count, lead);
+  const noteParts = [...(assessment ? [assessment] : []), ...(health.faults.length > 0 ? health.faults : health.inherited)];
   if (noteParts.length > 0) {
     const note = document.createElement("span");
     note.className = "pd-stale-note";
-    note.textContent = ` · ${humanList(noteParts, 2)}`;
+    note.textContent = `\n${humanList(noteParts, assessment ? 3 : 2)}`;
     stamp.append(note);
   }
-  const detail = [...health.faults, ...health.inherited];
+  const detail = [...(assessment ? [assessment] : []), ...health.faults, ...health.inherited];
   stamp.title = detail.length > 0
     ? `Served source health: ${health.ok} of ${health.total} ok; ${detail.join(", ")}`
     : `Served source health: ${health.ok} of ${health.total} ok`;
@@ -1023,14 +1128,20 @@ const REGIME_CLUSTERS = [
 function renderRegimeGrid(snap = {}, stress = {}) {
   const grid = $("regimeSummaryCard");
   if (!grid) return;
-  grid.replaceChildren(...REGIME_CLUSTERS.map((cluster) => regimeClusterTile(cluster, snap, stress)));
+  const expanded = new Set([...grid.children].filter((tile) => tile.open).map((tile) => tile.dataset.cluster));
+  grid.replaceChildren(...REGIME_CLUSTERS.map((cluster) => {
+    const tile = regimeClusterTile(cluster, snap, stress);
+    tile.open = expanded.has(cluster.key);
+    return tile;
+  }));
 }
 
 function regimeClusterTile(cluster, snap = {}, stress = {}) {
   const band = regimeClusterBand(cluster, snap, stress);
   const fault = band === "stale" ? clusterFault(cluster, snap, stress) : null;
   const lead = clusterLeadIndicator(cluster, stress);
-  const tile = document.createElement("div");
+  const tile = document.createElement("details");
+  tile.dataset.cluster = cluster.key;
   tile.className = "pd-tile";
   // A window the daemon measured and called green is a state, not the absence
   // of one, so this is the one grid that asks for the nominal lamp. Muted now
@@ -1048,7 +1159,10 @@ function regimeClusterTile(cluster, snap = {}, stress = {}) {
   const fig = document.createElement("div");
   fig.className = "pd-tile__fig";
   fig.textContent = clusterFigure(lead, band, fault);
-  tile.append(bar, legend, cap, fig);
+  const summary = document.createElement("summary");
+  summary.className = "regime-row-summary";
+  summary.append(bar, legend, cap);
+  tile.append(summary, fig);
   // Third line: the served trip anchor, engraved beneath the reading so the
   // serves no trip stays figure-only — this renderer never supplies a cutoff.
   const trip = clusterTrip(lead, band);
@@ -1062,7 +1176,13 @@ function regimeClusterTile(cluster, snap = {}, stress = {}) {
     .map((part) => humanizeStalenessSeconds(cleanDetail(part)))
     .filter((part) => part && part !== "--")
     .join(" · ");
-  tile.setAttribute("aria-label", `${cluster.legend} ${clusterCaption(lead, band, fault)}`);
+  const context = document.createElement("p");
+  context.className = "regime-row-context";
+  context.textContent = [lead.comment, indicatorAsOfLabel(lead.as_of || fault?.asOf)]
+    .map((part) => humanizeStalenessSeconds(cleanDetail(part)))
+    .filter((part) => part && part !== "--").join(" · ");
+  tile.append(context);
+  summary.setAttribute("aria-label", `${cluster.legend} ${clusterCaption(lead, band, fault)}`);
   return tile;
 }
 
@@ -1367,7 +1487,7 @@ function regimeStaleBudgetMinutes(snap) {
 
 // regimeGovernedNote surfaces the confirmation-policy detail: provisional
 // so the panel never shows an unqualified red while the engine itself is
-function regimeGovernedNote(snap, market) {
+function regimeGovernedNote(snap, market, compact = false) {
   const parts = [];
   const unconfirmed = market?.unconfirmed_red_cluster_names || [];
   if (unconfirmed.length > 0) {
@@ -1378,7 +1498,7 @@ function regimeGovernedNote(snap, market) {
     // to perform a confirmation ritual.
     const subject = humanList(unconfirmed.map(clusterInputLabel), 2);
     const verb = unconfirmed.length === 1 ? "is provisional" : "are provisional";
-    parts.push(`${subject} ${verb}; Canary will confirm or clear ${unconfirmed.length === 1 ? "it" : "them"} on the next fresh read`);
+    parts.push(compact ? `${subject} awaiting confirmation` : `${subject} ${verb}; Canary will confirm or clear ${unconfirmed.length === 1 ? "it" : "them"} on the next fresh read`);
   }
   for (const g of snap.regime?.lifecycle?.governors || []) {
     if (g?.action === "severity_capped") {
@@ -1547,8 +1667,7 @@ function legacyRegimeTone(label) {
 }
 
 function marketRegimeLabel(posture = {}) {
-  const label = cleanDetail(posture.label);
-  return label === "--" ? "--" : labelize(label);
+  return cleanDetail(posture.label);
 }
 
 function marketRegimeStatusLine(snap, stress, market, indicators) {
@@ -1743,7 +1862,7 @@ function clusterInputLabel(cluster) {
     case "fx":
       return "USD/JPY baseline";
     case "gamma":
-      return "gamma cache";
+      return "gamma data";
     case "breadth":
       return "breadth compute";
     case "vol":
@@ -2068,4 +2187,4 @@ function heldStressFlagLabel(value) {
   return cleanDetail(value);
 }
 
-export { regimeGammaDetails, applyTileSeverity, bandRank, CLUSTER_FAULT_LISTS, clusterCaption, clusterFault, clusterFigure, clusterIndicators, clusterInputLabel, clusterLeadIndicator, clusterNameListed, clusterSourceAsOf, clusterSourceFault, clusterSourceRows, clusterTrip, detailCard, earningsApplicabilitySummary, earningsHealthNotes, faultCaption, firstClause, gatewayDataStatus, heldStressEvidence, heldStressFlagLabel, heldStressItems, heldStressReasonLabel, heldStressReasonLabels, heldStressRow, heldStressSummary, heldStressTone, humanizeStalenessSeconds, humanList, indicatorAsOfLabel, indicatorBand, indicatorStatusClass, lampTestSources, latestRegimeRead, latestRegimeTimestamp, latestRegimeTimestampFallback, leadingClause, legacyRegimeTone, marketAccessBySymbol, marketAccessReasonLabel, marketExplanation, marketHasDataGaps, marketQuoteCell, marketQuoteChangeClass, marketQuoteErrorLabel, marketQuoteFallback, marketQuoteInterruptedLine, marketQuoteSessionClosed, marketQuoteSourceLine, marketRegimeLabel, marketRegimeStatusLine, marketSourceErrorLabel, marketSourceIssueLabels, masterSeverity, masterSubline, normalizeRegimePosture, offPanelRedClusters, portfolioExplanation, protectionCoverageStressLine, quoteBySymbol, quoteChange, quoteChangePct, quotePrevClose, quotePrice, quoteTime, reconcileSignalPanelTimes, REGIME_CLUSTERS, regimeAuthorityLabel, regimeAuthorityReasonLabel, regimeAuthorityStatusLine, regimeAuthorityView, regimeClusterBand, regimeClusterTile, regimeFallbackIndicators, regimeGovernedNote, regimeGovernorReasonLabel, regimePosture, regimePostureDetailTone, regimePresentationPosture, regimeStaleBudgetMinutes, regimeWeatherClass, renderHeldStress, renderLampTest, renderMarketContext, renderMarketWeather, renderRegimeAuthorityTimestamp, renderRegimeDetail, renderRegimeGrid, renderRegimePanel, renderRegimeQualityRemarks, renderRulesCard, renderRulesGrid, renderRulesProvenance, renderRulesTileState, renderSignedPercent, renderStressDetail, renderStressStatus, renderStressTimestamp, RULE_TONES, ruleChecklistRow, ruleMeasureMeter, ruleStatusLabel, rulesTileFigure, ruleTone, severityRank, snapshotSourceName, sourceHealthMentions, sourceTransportFault, staleFigure, stressCushionFigure, stressDriverLabel, stressDriverPriority, stressDriverRow, stressDriverRows, stressDriverTone, stressEmptyDriverRow, stressExplanationCards, stressHasProvisionalOnlyMarketWarning, stressInputCheckBlocksAction, stressInputCheckSentence, stressInputIssueLabels, stressInputIssueSummary, stressNeedsInputCheck, stressRowNeedsAttention, stressStageLabel, stressSummaryText, unknownEventRuleNote, worstSeverity };
+export { regimeGammaDetails, applyTileSeverity, bandRank, CLUSTER_FAULT_LISTS, clusterCaption, clusterFault, clusterFigure, clusterIndicators, clusterInputLabel, clusterLeadIndicator, clusterNameListed, clusterSourceAsOf, clusterSourceFault, clusterSourceRows, clusterTrip, detailCard, earningsApplicabilitySummary, earningsHealthNotes, faultCaption, firstClause, gatewayDataStatus, heldStressEvidence, heldStressFlagLabel, heldStressItems, heldStressReasonLabel, heldStressReasonLabels, heldStressRow, heldStressSummary, heldStressTone, humanizeStalenessSeconds, humanList, indicatorAsOfLabel, indicatorBand, indicatorStatusClass, lampTestSources, latestRegimeRead, latestRegimeTimestamp, latestRegimeTimestampFallback, leadingClause, legacyRegimeTone, marketAccessBySymbol, marketAccessReasonLabel, marketExplanation, marketHasDataGaps, marketQuoteCell, marketQuoteChangeClass, marketQuoteErrorLabel, marketQuoteFallback, marketQuoteInterruptedLine, marketQuoteSessionClosed, marketQuoteSourceLine, marketRegimeLabel, marketRegimeStatusLine, marketSourceErrorLabel, marketSourceIssueLabels, masterSeverity, masterSubline, normalizeRegimePosture, offPanelRedClusters, portfolioExplanation, protectionCoverageStressLine, quoteBySymbol, quoteChange, quoteChangePct, quotePrevClose, quotePrice, quoteTime, reconcileSignalPanelTimes, REGIME_CLUSTERS, regimeAuthorityLabel, regimeAuthorityReasonLabel, regimeAuthorityStatusLine, regimeAuthorityView, regimeClusterBand, regimeClusterTile, regimeFallbackIndicators, regimeGovernedNote, regimeGovernorReasonLabel, regimePosture, regimePostureDetailTone, regimePresentationPosture, regimeStaleBudgetMinutes, regimeWeatherClass, renderHeldStress, renderLampTest, renderMarketContext, renderMarketWeather, renderRegimeAuthorityTimestamp, renderRegimeDetail, renderRegimeGrid, renderRegimePanel, renderRegimeQualityRemarks, renderRulesCard, renderRulesGrid, renderRulesProvenance, renderRulesTileState, renderSignedPercent, renderStressDetail, renderStressStatus, renderStressTimestamp, RULE_TONES, ruleChecklistRow, ruleGroupKey, ruleStatusLabel, rulesTileFigure, ruleTone, severityRank, snapshotSourceName, sourceHealthMentions, sourceTransportFault, staleFigure, stressCushionFigure, stressDriverLabel, stressDriverPriority, stressDriverRow, stressDriverRows, stressDriverTone, stressEmptyDriverRow, stressExplanationCards, stressHasProvisionalOnlyMarketWarning, stressInputCheckBlocksAction, stressInputCheckSentence, stressInputIssueLabels, stressInputIssueSummary, stressNeedsInputCheck, stressRowNeedsAttention, stressStageLabel, stressSummaryText, unknownEventRuleNote, worstSeverity };

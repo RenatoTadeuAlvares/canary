@@ -1,6 +1,7 @@
 name = "risk_governance_reviewer"
 description = "Read-only reviewer for risk policy, pre/post-trade enforcement and reporting, exceptions, and operating cadence."
 sandbox_mode = "read-only"
+model = "gpt-6-astra"
 model_reasoning_effort = "high"
 developer_instructions = """
 Review proposed Canary risk changes as a senior trading-risk and controls owner.

@@ -290,7 +290,8 @@ function renderUnderlyings(positions = {}, account = {}, marketEvents = state.sn
   const authorityView = positionsAuthorityView(positions, state.snapshot?.sources?.positions || {});
   const legCount = rows.reduce((total, row) => total + row.stockCount + row.optionCount, 0);
   const quoteSummary = underlyingQuoteSummary(rows);
-  renderUnderlyingPnlSummary(authorityView.available ? underlyingHeldDailyPnlTotals(rows, baseCurrency) : {});
+  const completePnl = authorityView.available && rows.length > 0 && rows.every((row) => Number.isFinite(row.pnl));
+  renderUnderlyingPnlSummary(authorityView.available ? underlyingHeldDailyPnlTotals(rows, baseCurrency) : {}, completePnl);
   renderMovers(authorityView.available ? rows : [], baseCurrency);
   renderMarketFlagRail("underlyingFlagRail", underlyingHeroMarketFlags(rows, marketEvents));
 	if (count) {
@@ -377,15 +378,16 @@ function renderPositionsFreshness(el, positions = {}, source = {}) {
   renderFreshnessTimestamp(el, authority.as_of || positions.as_of, { staleMinutes: 15, quietWhenFresh: true, fallback: "Position time unavailable" });
 }
 
-function renderUnderlyingPnlSummary(totals) {
-  setUnderlyingSummaryPnl("underlyingWinnerPnl", totals.winner, totals.winnerCurrency);
-  setUnderlyingSummaryPnl("underlyingLoserPnl", totals.loser, totals.loserCurrency);
+function renderUnderlyingPnlSummary(totals, complete = false) {
+  const emptyLabel = complete ? "None" : "Unavailable";
+  setUnderlyingSummaryPnl("underlyingWinnerPnl", totals.winner, totals.winnerCurrency, emptyLabel);
+  setUnderlyingSummaryPnl("underlyingLoserPnl", totals.loser, totals.loserCurrency, emptyLabel);
   // The winner/loser buckets and the brief's Movers row share one basis —
   const basis = $("underlyingPnlBasis");
   if (basis) {
     const hasTotals = hasNumericValue(totals.winner) || hasNumericValue(totals.loser);
     basis.hidden = !hasTotals;
-    basis.textContent = `Daily P/L by underlying · all held names${marketSessionClosed() ? " · since last close" : ""}`;
+    basis.textContent = `Daily P/L by underlying · ${complete ? "all held names" : "available values"}${marketSessionClosed() ? " · since last close" : ""}`;
   }
 }
 
@@ -453,12 +455,12 @@ function marketSessionClosed() {
   return Boolean(session && session.is_open === false);
 }
 
-function setUnderlyingSummaryPnl(id, value, currency) {
+function setUnderlyingSummaryPnl(id, value, currency, emptyLabel = "Unavailable") {
   const el = $(id);
   if (!el) return;
   if (!hasNumericValue(value)) {
-    el.className = "signed";
-    el.textContent = "--";
+    el.className = "signed underlying-pnl-card__empty";
+    el.textContent = emptyLabel;
     return;
   }
   if (sensitiveMoneyHidden(value)) {
@@ -685,7 +687,7 @@ function underlyingQuoteSummary(rows) {
   }
   const quoted = quoteRows.filter((row) => typeof quotePrice(row.quote) === "number").length;
   if (quoted > 0) {
-    return `Quotes updating for ${quoted}/${quoteRows.length} rows`;
+    return `Quotes: ${quoted}/${quoteRows.length} expected underlyings`;
   }
   return "";
 }
@@ -793,38 +795,37 @@ function underlyingBookRow(row, baseCurrency) {
   price.className = "underlying-row__metric underlying-row__metric--quote quote-" + quoteStatus.tone;
   const priceLabel = document.createElement("span");
   priceLabel.className = "underlying-row__metric-label";
-  priceLabel.textContent = "Quote";
+  priceLabel.textContent = row.priceSource === "account mark" ? "Account mark" : row.priceSource === "option model spot" ? "Model spot" : "Quote";
   const priceValue = document.createElement("b");
-  priceValue.textContent = displayMoney(row.price, row.currency);
+  priceValue.textContent = typeof row.price === "number" ? displayMoney(row.price, row.currency) : "—";
   const priceNote = document.createElement("small");
   const changeTone = typeof row.change === "number" ? row.change : row.changePct;
   priceNote.className = signedClass(changeTone);
-  priceNote.textContent = underlyingDayMoveText(row);
+  priceNote.textContent = typeof row.price === "number" ? underlyingDayMoveText(row) : "Price unavailable";
   price.append(priceLabel, priceValue, priceNote);
 
   const pnl = document.createElement("span");
   pnl.className = "underlying-row__metric underlying-row__metric--pnl";
   const pnlLabel = document.createElement("span");
   pnlLabel.className = "underlying-row__metric-label";
-  pnlLabel.textContent = "Today";
+  pnlLabel.textContent = "Daily P/L";
   const pnlValue = document.createElement("b");
   pnlValue.className = sensitiveMoneyHidden(row.pnl) ? "is-private" : signedClass(row.pnl);
   pnlValue.textContent = sensitiveDisplayMoney(row.pnl, row.pnlCurrency || baseCurrency);
   const pnlNote = document.createElement("small");
   pnlNote.textContent = row.pnlSource || "Daily P/L";
+  pnlNote.hidden = pnlNote.textContent.toLowerCase() === "daily p/l";
   pnl.append(pnlLabel, pnlValue, pnlNote);
 
   const openPnl = document.createElement("span");
   openPnl.className = "underlying-row__metric underlying-row__metric--open";
   const openLabel = document.createElement("span");
   openLabel.className = "underlying-row__metric-label";
-  openLabel.textContent = "Open";
+  openLabel.textContent = "Unrealized P/L";
   const openValue = document.createElement("b");
   openValue.className = sensitiveMoneyHidden(row.openPnl) ? "is-private" : signedClass(row.openPnl);
   openValue.textContent = sensitiveDisplayMoney(row.openPnl, row.openPnlCurrency || baseCurrency);
-  const openNote = document.createElement("small");
-  openNote.textContent = "Unrealized P/L";
-  openPnl.append(openLabel, openValue, openNote);
+  openPnl.append(openLabel, openValue);
 
   const disclosure = document.createElement("span");
   disclosure.className = "underlying-row__disclosure";

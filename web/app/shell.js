@@ -356,7 +356,7 @@ function marketSessionNow(session) {
   });
 }
 
-// Seconds precision: the ticking seconds digit is the proof the readout is
+// Keep seconds near a session boundary; day-scale closures use hours.
 function countdownLabel(target) {
   if (!target) return "";
   const ms = target.getTime() - Date.now();
@@ -367,7 +367,7 @@ function countdownLabel(target) {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
   const clock = `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  return days > 0 ? `${days}d ${clock}` : clock;
+  return days > 0 ? `${days}d ${hours}h` : clock;
 }
 
 function greeksCoverage(portfolio, positions) {

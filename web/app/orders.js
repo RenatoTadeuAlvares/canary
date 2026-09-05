@@ -24,11 +24,10 @@ function renderOpenOrders() {
   const count = $("ordersOpenCount");
   count.textContent = orders.length === 1 ? "1 open" : `${orders.length} open`;
   count.classList.toggle("is-zero", orders.length === 0);
+  count.hidden = orders.length === 0;
+  $("ordersOpenTitle").textContent = orders.length ? "Open orders" : "No open orders";
   if (orders.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "empty-row";
-    empty.textContent = "None working.";
-    list.replaceChildren(empty);
+    list.replaceChildren();
     return;
   }
   list.replaceChildren(...orders.map(openOrderRowElement));

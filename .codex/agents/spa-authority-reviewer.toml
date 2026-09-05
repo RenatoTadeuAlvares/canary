@@ -1,6 +1,7 @@
 name = "spa_authority_reviewer"
 description = "Read-only reviewer for Canary SPA authority, embedded app refresh, rendered QA, and financial label semantics."
 sandbox_mode = "read-only"
+model = "gpt-6-astra"
 model_reasoning_effort = "medium"
 developer_instructions = """
 Review Canary SPA changes like a product and data-authority owner.

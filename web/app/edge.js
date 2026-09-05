@@ -314,12 +314,12 @@ function renderEdgeAccount(result) {
 }
 
 function renderEdgeMatrix(result) {
-  const period = result.window === "365d" ? "One year" : "90 days";
-  $("edgeImpactLens").textContent = `${period} · ${result.automatic_horizon ? "automatic · " : ""}${result.horizon_sessions}-session headline`;
+  $("edgeImpactLens").textContent = `After ${result.horizon_sessions} session${result.horizon_sessions === 1 ? "" : "s"}`;
   $("edgeHeadline").textContent = state.accountValueVisible
     ? (result.headline || "No highlighted finding has sufficient evidence.")
-    : "Reveal account values to view the monetary headline.";
+    : "Account values hidden";
   $("edgeHeadline").classList.toggle("is-private", !state.accountValueVisible && Boolean(result.headline));
+  $("edgeHeadline").hidden = !state.accountValueVisible;
   const contextChips = (result.market_context || []).map((context) => {
     const chip = document.createElement("span");
     const move = context.kind === "volatility_index" && hasNumericValue(context.median_change_points)
@@ -387,6 +387,7 @@ function renderEdgeFindings(result) {
     const expanded = result.change?.id === finding.change_id;
     row.setAttribute("aria-expanded", String(expanded));
     row.setAttribute("aria-controls", "edgeChangePanel");
+    row.setAttribute("aria-describedby", "edgeFindingsBasis");
     row.setAttribute("aria-label", `${finding.symbol || "Finding"} ${labelize(finding.action)}: explain the broker-backed calculation`);
     row.addEventListener("click", () => {
       if (state.edgeResult?.change?.id === finding.change_id) {
@@ -403,15 +404,30 @@ function renderEdgeFindings(result) {
     const title = document.createElement("b");
     title.textContent = `${finding.symbol || "—"} · ${labelize(finding.action)}`;
     const meta = document.createElement("small");
-    const impactPct = hasNumericValue(finding.decision_impact_pct) ? ` · ${Number(finding.decision_impact_pct).toFixed(2)}% of decision notional` : "";
-    const market = (finding.market_context || []).map(edgeMarketContextText).join(" · ");
-    meta.textContent = `${calendarDate(finding.executed_at)} · ${finding.horizon_sessions} sessions · ${labelize(finding.direction)}${impactPct}${market ? ` · ${market}` : ""}`;
+    const date = document.createElement("span");
+    date.textContent = calendarDate(finding.executed_at) + "\n";
+    const horizon = document.createElement("span");
+    horizon.textContent = `${labelize(finding.direction)} · ${finding.horizon_sessions} session${finding.horizon_sessions === 1 ? "" : "s"}`;
+    meta.append(date, horizon);
     identity.append(title, meta);
     const amount = document.createElement("strong");
     amount.textContent = edgeMoney(finding.decision_impact_base, edgeCurrency(result));
     amount.className = moneyTone(finding.decision_impact_base);
     amount.classList.toggle("is-private", !state.accountValueVisible);
-    row.append(identity, amount);
+    const outcome = document.createElement("div");
+    outcome.className = "edge-finding__outcome";
+    outcome.append(amount);
+    if (hasNumericValue(finding.decision_impact_pct)) {
+      const impact = document.createElement("span");
+      impact.className = "edge-finding__percent " + moneyTone(finding.decision_impact_pct);
+      impact.textContent = `${Number(finding.decision_impact_pct) > 0 ? "+" : ""}${Number(finding.decision_impact_pct).toFixed(2)}%`;
+      outcome.append(impact);
+    }
+    const arrow = document.createElement("span");
+    arrow.className = "edge-finding__arrow";
+    arrow.setAttribute("aria-hidden", "true");
+    arrow.textContent = "›";
+    row.append(identity, outcome, arrow);
     return row;
   }));
 }
@@ -807,27 +823,41 @@ export { edgeHasResults, refreshEdge, renderEdge, validEdgeResult };
 function renderEdgeLearning(result) {
   const host = $("edgeLearning");
   const nodes = [];
+  const details = document.createElement("details");
+  details.className = "edge-learning-detail";
+  details.open = [...host.children].some((node) => node.className === "edge-learning-detail" && node.open);
+  const summary = document.createElement("summary");
+  summary.textContent = "Sample & comparisons";
+  details.append(summary);
   const paragraph = (text, className = "") => {
     const node = document.createElement("p"); node.textContent = text; node.className = className; return node;
   };
   const selection = result.horizon_selection;
-  nodes.push(paragraph(`${selection.scored_changes} of ${selection.eligible_changes} eligible stock/ETF changes reviewed (${Number(selection.coverage_pct).toFixed(0)}%). The rest are not assessed at this horizon.`, "edge-learning__coverage"));
+  const coverage = document.createElement("div");
+  coverage.className = "edge-review-coverage";
+  const percentage = document.createElement("b");
+  percentage.textContent = `${Number(selection.coverage_pct).toFixed(0)}% reviewed`;
+  const sample = document.createElement("span");
+  sample.textContent = `${selection.scored_changes} of ${selection.eligible_changes} eligible stock/ETF decisions`;
+  coverage.append(percentage, sample);
+  const limitation = paragraph("Price outcomes; skill and risk-management quality are not measured.", "edge-review-limit");
+  $("edgeReviewScope").replaceChildren(coverage, limitation);
   const patterns = result.patterns || [];
   const selected = patterns.find((p) => p.action === result.review_action && p.direction === result.review_direction);
   const horizon = selected?.horizons.find((h) => h.sessions === result.horizon_sessions);
   if (horizon) {
-    nodes.push(paragraph(`Reviewed group: ${labelize(selected.direction)} ${selected.action}s · ${horizon.sample_count} of ${selected.eligible_changes} changes at ${horizon.sessions} sessions.`, "edge-learning__coverage"));
-    if (result.review_note) nodes.push(paragraph(result.review_note));
+    details.append(paragraph(`${labelize(selected.direction)} ${selected.action}s · ${horizon.sample_count}/${selected.eligible_changes} decisions · ${horizon.months.length} months · ${horizon.distinct_dates} dates.`, "edge-review-group"));
+    if (result.review_note) details.append(paragraph(result.review_note));
     const size = horizon.notional_coverage_pct == null ? "Trade-size coverage unavailable: some execution amounts are missing." : `${Number(horizon.notional_coverage_pct).toFixed(0)}% of this group's execution notional is covered.`;
-    nodes.push(paragraph(size));
+    details.append(paragraph(size));
     if (horizon.largest_date_share_pct != null) {
-      nodes.push(paragraph(`One execution date accounts for ${Number(horizon.largest_date_share_pct).toFixed(0)}% of absolute price impact; one contract accounts for ${Number(horizon.largest_contract_share_pct).toFixed(0)}%. Without the largest decision: ${edgeMoney(horizon.without_largest_base, edgeCurrency(result))}.`));
+      details.append(paragraph(`One execution date accounts for ${Number(horizon.largest_date_share_pct).toFixed(0)}% of absolute price impact; one contract accounts for ${Number(horizon.largest_contract_share_pct).toFixed(0)}%. Without the largest decision: ${edgeMoney(horizon.without_largest_base, edgeCurrency(result))}.`));
     }
     if (horizon.months.length) {
       const months = document.createElement("details");
       const title = document.createElement("summary"); title.textContent = "Monthly results for these decisions"; months.append(title);
       for (const month of horizon.months) months.append(paragraph(`${month.month}: ${month.sample_count} decisions · total ${edgeMoney(month.total_base, edgeCurrency(result))} · median ${edgeMoney(month.median_base, edgeCurrency(result))}.`));
-      nodes.push(months);
+      details.append(months);
     }
     const comparisons = document.createElement("div"); comparisons.className = "edge-learning__comparisons";
     for (const comparison of selected.comparisons) {
@@ -838,19 +868,19 @@ function renderEdgeLearning(result) {
       if (comparison.sample_count > 0 && comparison.sample_count < 3) card.append(paragraph("Too few matched decisions for a repeated observation."));
       comparisons.append(card);
     }
-    nodes.push(comparisons);
-    nodes.push(paragraph(`Risk context: ${horizon.linked_protection_count} decisions linked to a local protection proposal, ${horizon.partial_protection_count} partially linked. Remaining purpose unknown. ${result.protection_state === "changed" ? "Local records changed; prior links are withheld." : result.protection_state === "unavailable" ? "Local protection evidence is unavailable." : "A price outcome does not show whether protection was effective."}`));
+    details.append(comparisons);
+    details.append(paragraph(`Risk context: ${horizon.linked_protection_count} decisions linked to a local protection proposal, ${horizon.partial_protection_count} partially linked. Remaining purpose unknown. ${result.protection_state === "changed" ? "Local records changed; prior links are withheld." : result.protection_state === "unavailable" ? "Local protection evidence is unavailable." : "A price outcome does not show whether protection was effective."}`));
   }
   if (patterns.length) {
-    const details = document.createElement("details");
-    const summary = document.createElement("summary"); summary.textContent = "Coverage by action and direction"; details.append(summary);
+    const actions = document.createElement("details");
+    const summary = document.createElement("summary"); summary.textContent = "Coverage by action and direction"; actions.append(summary);
     for (const p of patterns) {
       const h = p.horizons.find((row) => row.sessions === result.horizon_sessions);
-      if (h) details.append(paragraph(`${labelize(p.direction)} ${labelize(p.action)}: ${h.sample_count}/${p.eligible_changes} changes; ${Object.entries(h.exclusions).map(([key, count]) => `${count} ${labelize(key)}`).join(", ") || "none excluded"}.`));
+      if (h) actions.append(paragraph(`${labelize(p.direction)} ${labelize(p.action)}: ${h.sample_count}/${p.eligible_changes} changes; ${Object.entries(h.exclusions).map(([key, count]) => `${count} ${labelize(key)}`).join(", ") || "none excluded"}.`));
     }
-    nodes.push(details);
-    nodes.push(paragraph("The matrix below uses different samples at each horizon. Use the matched comparisons above to compare later closes."));
+    details.append(actions);
   }
+  nodes.push(details);
   host.replaceChildren(...nodes);
 }
 
