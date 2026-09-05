@@ -1,0 +1,15 @@
+diff --git a/internal/daemon/gamma_zero_compute.go b/internal/daemon/gamma_zero_compute.go
+--- a/internal/daemon/gamma_zero_compute.go
++++ b/internal/daemon/gamma_zero_compute.go
+@@ -1901,3 +1901,10 @@
+ func sweepProfile(legs []legData, snapshotSpot, sweepRangePct float64, skewByExpiry map[string]SkewCurve) []rpc.GammaProfilePoint {
+-	return gammaSweep(legs, snapshotSpot, sweepRangePct, skewByExpiry)
++	lo, hi := snapshotSpot*(1-sweepRangePct), snapshotSpot*(1+sweepRangePct)
++	out := make([]rpc.GammaProfilePoint, 60)
++	for i := range 60 {
++		x := lo + float64(i)*(hi-lo)/59
++		g, _ := gammaScenarioGEX(legs, x, snapshotSpot, skewByExpiry)
++		out[i] = rpc.GammaProfilePoint{Spot: x, GEX: g}
++	}
++	return out
+ }
