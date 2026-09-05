@@ -103,7 +103,7 @@ func populateEdgeLearningSummary(out *rpc.EdgeResult) {
 	}
 	out.ReviewAction, out.ReviewDirection = selected.Action, selected.Direction
 	out.MarketContext = append([]rpc.EdgeMarketContextRollup{}, lens.MarketContext...)
-	out.MarketContextMissing = nil
+	out.MarketContextMissing = []string{}
 	present := map[string]bool{}
 	for _, c := range lens.MarketContext {
 		present[c.Key] = true

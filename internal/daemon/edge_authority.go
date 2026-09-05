@@ -1043,8 +1043,8 @@ func edgeHorizonSelection(in edgecore.Result, horizon int, automatic bool) rpc.E
 
 func edgeHeadline(result *rpc.EdgeResult) string {
 	result.ReviewAction, result.ReviewDirection, result.ReviewNote = "", "", ""
-	result.MarketContext = nil
-	result.MarketContextMissing = nil
+	result.MarketContext = []rpc.EdgeMarketContextRollup{}
+	result.MarketContextMissing = []string{}
 	result.Headline = edgeUnselectedHeadline(result)
 	populateEdgeLearningSummary(result)
 	return result.Headline

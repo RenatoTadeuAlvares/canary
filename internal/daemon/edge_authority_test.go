@@ -1041,3 +1041,30 @@ func TestEdgeHeadlineDoesNotPoolOpposingDirections(t *testing.T) {
 		t.Fatalf("directions pooled: %s", got)
 	}
 }
+
+func TestEdgeHeadlineKeepsEmptyContextArraysForSPA(t *testing.T) {
+	for _, qualified := range []bool{false, true} {
+		t.Run(fmt.Sprint(qualified), func(t *testing.T) {
+			r := &rpc.EdgeResult{Account: &rpc.EdgeAccountResult{StartingEquityBase: 100000}, HorizonSessions: 20, HorizonSelection: rpc.EdgeHorizonSelection{Adequate: qualified}, Coverage: rpc.EdgeCoverage{TradeChanges: 3}}
+			h := rpc.EdgePatternHorizon{Sessions: 20, SampleCount: 3, TotalBase: new(float64(300)), MedianBase: new(float64(100))}
+			for _, b := range edgecore.MarketBenchmarks() {
+				h.MarketContext = append(h.MarketContext, rpc.EdgeMarketContextRollup{Key: b.Key})
+			}
+			r.Patterns = []rpc.EdgeDecisionPattern{{Action: "add", Direction: "long", EligibleChanges: 3, Horizons: []rpc.EdgePatternHorizon{h}}}
+			edgeHeadline(r)
+			raw, err := json.Marshal(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var body map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &body); err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []string{"market_context", "market_context_missing"} {
+				if len(body[key]) == 0 || body[key][0] != '[' {
+					t.Fatalf("%s must remain a JSON array for the SPA", key)
+				}
+			}
+		})
+	}
+}
