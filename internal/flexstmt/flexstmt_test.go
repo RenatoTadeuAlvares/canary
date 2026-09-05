@@ -198,3 +198,18 @@ func TestQuerySchemaFingerprintContainsNoStatementValues(t *testing.T) {
 		t.Fatalf("missing report fingerprint = %q", got)
 	}
 }
+
+func TestParseEquityRequiresAmountOnEveryRow(t *testing.T) {
+	t.Parallel()
+	for _, attr := range []string{"", `total=""`, `total=" "`, `total="NaN"`, `total="Inf"`, `total="0"`} {
+		data := `<FlexQueryResponse><FlexStatements><FlexStatement accountId="U" fromDate="20260101" toDate="20260131" whenGenerated="20260201;010000"><EquitySummaryInBase><EquitySummaryByReportDateInBase reportDate="20260101" total="10000"/><EquitySummaryByReportDateInBase reportDate="20260131" ` + attr + `/></EquitySummaryInBase></FlexStatement></FlexStatements></FlexQueryResponse>`
+		statements, err := Parse([]byte(data))
+		if attr != `total="0"` {
+			if err == nil {
+				t.Fatal("missing equity total accepted as zero")
+			}
+		} else if err != nil || len(statements) != 1 || len(statements[0].Equity) != 2 || statements[0].Equity[1].TotalBase != 0 {
+			t.Fatalf("explicit zero equity rejected: %v", err)
+		}
+	}
+}

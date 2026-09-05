@@ -145,8 +145,8 @@ type xmlFlexQueryResponse struct {
 			Description          string   `xml:"description,attr"`
 		} `xml:"Transfers>Transfer"`
 		Equity []struct {
-			ReportDate string  `xml:"reportDate,attr"`
-			Total      float64 `xml:"total,attr"`
+			ReportDate string `xml:"reportDate,attr"`
+			Total      string `xml:"total,attr"`
 		} `xml:"EquitySummaryInBase>EquitySummaryByReportDateInBase"`
 	} `xml:"FlexStatements>FlexStatement"`
 }
@@ -253,7 +253,14 @@ func Parse(data []byte) ([]Statement, error) {
 			st.Transfers = append(st.Transfers, tr)
 		}
 		for _, e := range raw.Equity {
-			row := EquityRow{TotalBase: e.Total}
+			total, err := optionalFloat("equity total", e.Total)
+			if err != nil {
+				return nil, err
+			}
+			if total == nil {
+				return nil, fmt.Errorf("equity total: missing broker amount")
+			}
+			row := EquityRow{TotalBase: *total}
 			if row.ReportDate, err = parseFlexDate(e.ReportDate); err != nil {
 				return nil, fmt.Errorf("equity reportDate: %w", err)
 			}

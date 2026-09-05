@@ -822,3 +822,71 @@ func day(v string) time.Time {
 	return parsed
 }
 func dayTime(v string, hour int) time.Time { return day(v).Add(time.Duration(hour) * time.Hour) }
+
+func TestAnalyzeOptionSummaryDoesNotDuplicateExecutions(t *testing.T) {
+	t.Parallel()
+	for _, detail := range []string{"", "EXECUTION", "EXECUTIONS"} {
+		t.Run(detail, func(t *testing.T) {
+			row := flexstmt.Trade{RecordID: "fill", AccountID: "U", ConID: 456, Symbol: "ACME CALL", AssetClass: "OPT", Currency: "EUR", OrderID: "order", ExecutedAt: dayTime("2026-01-20", 10), Side: "SELL", OpenClose: "C", Quantity: new(float64(1)), Price: new(float64(3)), RealizedPNL: new(float64(100)), LevelOfDetail: detail}
+			summary := row
+			summary.RecordID, summary.LevelOfDetail = "summary", "SUMMARY"
+			st := edgeStatement()
+			st.Trades = []flexstmt.Trade{row, summary}
+			result, err := Analyze(Input{AsOf: day("2026-02-10"), WindowDays: 90, BaseCurrency: "EUR", Statements: []flexstmt.Statement{st}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			review := result.Options
+			if review.Coverage.ExecutionEpisodes != 1 || review.Realized.KnownPNLBase == nil || *review.Realized.KnownPNLBase != 100 || len(review.Realized.Episodes) != 1 || *review.Realized.Episodes[0].Legs[0].Quantity != 1 {
+				t.Fatalf("summary duplicated execution evidence: %+v", review)
+			}
+		})
+	}
+}
+
+func TestOptionExecutionPriceRequiresEveryFill(t *testing.T) {
+	t.Parallel()
+	for _, missing := range []string{"none", "price", "quantity"} {
+		t.Run(missing, func(t *testing.T) {
+			row := flexstmt.Trade{RecordID: "fill-one", AccountID: "U", ConID: 456, Symbol: "ACME CALL", AssetClass: "OPT", Currency: "EUR", OrderID: "order", ExecutedAt: dayTime("2026-01-20", 10), Side: "SELL", OpenClose: "C", Quantity: new(float64(1)), Price: new(float64(3)), RealizedPNL: new(float64(100)), LevelOfDetail: "EXECUTION"}
+			second := row
+			second.RecordID, second.Quantity, second.Price = "fill-two", new(float64(3)), new(float64(5))
+			if missing == "price" {
+				second.Price = nil
+			}
+			if missing == "quantity" {
+				second.Quantity = nil
+			}
+			st := edgeStatement()
+			st.Trades = []flexstmt.Trade{row, second}
+			result, err := Analyze(Input{AsOf: day("2026-02-10"), WindowDays: 90, BaseCurrency: "EUR", Statements: []flexstmt.Statement{st}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			leg := result.Options.Realized.Episodes[0].Legs[0]
+			if missing == "none" {
+				if leg.ExecutionPrice == nil || *leg.ExecutionPrice != 4.5 {
+					t.Fatalf("weighted price: %+v", leg)
+				}
+			} else if leg.ExecutionPrice != nil {
+				t.Fatalf("incomplete fills produced an execution price: %+v", leg)
+			}
+			if leg.RealizedPNLBase == nil || *leg.RealizedPNLBase != 200 {
+				t.Fatalf("broker realized evidence was lost: %+v", leg)
+			}
+		})
+	}
+}
+
+func TestAnalyzeAccountDoesNotExtendRequestedWindow(t *testing.T) {
+	t.Parallel()
+	st := edgeStatement()
+	st.Equity[0].ReportDate = day("2025-11-01")
+	result, err := Analyze(Input{AsOf: day("2026-02-10"), WindowDays: 90, BaseCurrency: "EUR", Statements: []flexstmt.Statement{st}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Account != nil || result.Coverage.ReasonCounts[ReasonQueryFieldMissing] == 0 {
+		t.Fatalf("sparse equity expanded the requested window: %+v", result.Account)
+	}
+}

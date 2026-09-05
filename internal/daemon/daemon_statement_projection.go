@@ -20,8 +20,8 @@ import (
 
 const (
 	statementProjectionScope   = "statements"
-	statementProjectionVersion = 6
-	statementProjectionStatus  = "parsed_v6"
+	statementProjectionVersion = 7
+	statementProjectionStatus  = "parsed_v7"
 	statementProjectionMaxRows = 10000
 )
 

@@ -358,7 +358,8 @@ func accountResult(ev evidence, asOf time.Time, days int, base string, coverage 
 	requested := asOf.AddDate(0, 0, -days)
 	startIdx := sort.SearchStrings(dayNames, dayKey(requested))
 	if startIdx >= len(dayNames)-1 {
-		startIdx = len(dayNames) - 2
+		coverage.ReasonCounts[ReasonQueryFieldMissing]++
+		return nil
 	}
 	startDay, _ := time.Parse("2006-01-02", dayNames[startIdx])
 	endDay, _ := time.Parse("2006-01-02", dayNames[len(dayNames)-1])
@@ -1054,6 +1055,10 @@ func buildOptionReview(ev evidence, from, to time.Time, base string, fxRates []f
 		if !strings.EqualFold(trade.AssetClass, "OPT") || trade.ConID == 0 || trade.ExecutedAt.Before(from) || trade.ExecutedAt.After(to) {
 			continue
 		}
+		// Summary rows repeat execution economics and cannot form episodes.
+		if trade.LevelOfDetail != "" && trade.LevelOfDetail != "EXECUTION" && trade.LevelOfDetail != "EXECUTIONS" {
+			continue
+		}
 		if trade.TradeID != "" {
 			tradeIDs[trade.TradeID] = true
 		}
@@ -1192,16 +1197,19 @@ func optionEpisodeTradeLeg(key string, rows []flexstmt.Trade, instruments map[in
 		missingSet[OptionMissingInstrument] = true
 	}
 	var quantity, weighted, weight, realized, costs float64
-	quantityKnown, realizedKnown, realizedMissing, costsKnown, costsMissing := true, 0, 0, 0, 0
+	quantityKnown, priceKnown := true, true
+	realizedKnown, realizedMissing, costsKnown, costsMissing := 0, 0, 0, 0
 	for _, row := range rows {
 		if row.Quantity == nil {
-			quantityKnown = false
+			quantityKnown, priceKnown = false, false
 		} else {
 			q := math.Abs(*row.Quantity)
 			quantity += q
 			if row.Price != nil {
 				weighted += q * *row.Price
 				weight += q
+			} else {
+				priceKnown = false
 			}
 		}
 		fx := baseConversionFX(row.Currency, base, row.ExecutedAt, row.FXRateToBase, fxRates)
@@ -1225,7 +1233,7 @@ func optionEpisodeTradeLeg(key string, rows []flexstmt.Trade, instruments map[in
 	if quantityKnown {
 		leg.Quantity = &quantity
 	}
-	if weight > 0 {
+	if priceKnown && weight > 0 {
 		value := weighted / weight
 		leg.ExecutionPrice = &value
 	}
