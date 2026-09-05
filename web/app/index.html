@@ -777,7 +777,7 @@
             <div class="protection-overview">
               <div>
                 <b id="protectionNoStopExposure">--</b>
-                <span>Without a working stop</span>
+                <span>Exposure without a stop-loss</span>
               </div>
               <div>
                 <b id="protectionActions">--</b>
@@ -796,13 +796,13 @@
               <div class="protection-rows" id="protectionRows"></div>
             </div>
             <details class="protection-disclosure protection-context">
-              <summary>Portfolio context <span id="protectionInputNotice"></span></summary>
+              <summary>Portfolio context</summary>
               <div class="protection-context__metrics">
-                <div><span>Actionable theta/day</span><b id="protectionTheta">--</b></div>
-                <div><span>Risk over target</span><b id="protectionRiskExcess">--</b></div>
+                <div><span>Actionable theta/day</span><b id="protectionTheta">--</b><small id="protectionThetaNote"></small></div>
+                <div><span>Risk over target</span><b id="protectionRiskExcess">--</b><small>Exposure in risk-reduction proposals, not a portfolio risk verdict.</small></div>
               </div>
               <div class="protection-exposure-note" id="protectionExposure" hidden></div>
-              <p>Coverage counts working stock and ETF stops. Staged proposals are not protection. Options are evaluated in Rules and option proposals.</p>
+              <p>Coverage counts active stock and ETF stop-loss orders. Staged proposals are not protection. Options are evaluated in Rules and option proposals.</p>
             </details>
             <button class="protection-trim-route" id="protectionTrimRoute" type="button" aria-haspopup="dialog" aria-controls="portfolioTrimSheet">
               <span><b>Trim portfolio</b><small>Reduce net delta exposure</small></span><span aria-hidden="true">&rsaquo;</span>

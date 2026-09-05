@@ -1318,6 +1318,38 @@ test("read-only protection explains and disables stop, repair, ignore, and portf
   }
 });
 
+test("protection context distinguishes missing theta inputs, closed-session context, and no reduction proposals", () => {
+  reset();
+  protectionActionFixture();
+  const proposals = state.snapshot.proposals;
+  Object.assign(proposals.counts, { theta_hygiene: 0, risk_reduction: 0 });
+  Object.assign(state.snapshot.positions.portfolio, { greeks_total: 1, greeks_coverage: 0 });
+  state.snapshot.positions.options = [{ warning_details: [{ code: "options_closed" }] }];
+  protection.renderProtectionPanel(proposals);
+  assert.equal(dom.element("protectionTheta").textContent, "Unavailable");
+  assert.match(dom.element("protectionThetaNote").textContent, /Options market closed/);
+  assert.equal(dom.element("protectionRiskExcess").textContent, "No risk reduction proposed");
+
+  state.snapshot.positions.options[0].warning_details = [];
+  delete proposals.counts.risk_reduction;
+  protection.renderProtectionPanel(proposals);
+  assert.doesNotMatch(dom.element("protectionThetaNote").textContent, /market closed/,
+    "a missing input alone must not imply that the options session is closed");
+  assert.equal(dom.element("protectionRiskExcess").textContent, "Unavailable",
+    "an absent proposal count must not imply that no reduction was proposed");
+
+  Object.assign(proposals.counts, { risk_reduction: 1, theta_per_day_base: 12, base_currency: "EUR" });
+  protection.renderProtectionPanel(proposals);
+  assert.equal(dom.element("protectionRiskExcess").textContent, "Review");
+  assert.match(dom.element("protectionTheta").textContent, /12/);
+  assert.doesNotMatch(dom.element("protectionThetaNote").textContent, /unavailable|closed/i,
+    "a served theta total takes priority over unavailable per-leg detail");
+  proposals.counts.risk_reduction_excess_notional_base = 0;
+  protection.renderProtectionPanel(proposals);
+  assert.match(dom.element("protectionRiskExcess").textContent, /0/,
+    "a served zero remains a measured amount rather than missing data");
+});
+
 test("protection consolidates a staged stop only with current, unambiguous held-contract and account evidence", () => {
   reset();
   const proposal = protectionActionFixture();
@@ -1329,7 +1361,7 @@ test("protection consolidates a staged stop only with current, unambiguous held-
   assert.equal(protection.protectionRepairProposal(row), proposal);
   protection.renderProtectionPanel(state.snapshot.proposals);
   assert.equal(dom.element("protectionCoverageRepair").hidden, true);
-  assert.match(byClass(dom.element("protectionRows"), "protection-row__status")[0].textContent, /No working stop · Proposal staged/);
+  assert.match(byClass(dom.element("protectionRows"), "protection-row__status")[0].textContent, /No active stop-loss · Proposal staged/);
 
   for (const [field, value] of [["account_id", "SYNTHETIC-OTHER"], ["account_mode", "live"]]) {
     const saved = state.snapshot.proposals[field];
@@ -1384,12 +1416,15 @@ test("stop review disclosure retains execution risk and fallback evidence withou
   assert.equal(review.tagName, "DETAILS");
   assert.equal(review.open, false);
   assert.match(byClass(review, "protection-row__summary")[0].textContent, /Stop 90.00 USD/);
-  assert.match(byClass(review, "protection-row__summary")[0].textContent, /Fallback trail/);
+  assert.match(byClass(review, "protection-row__summary")[0].textContent, /Preset stop distance/);
   const details = byClass(review, "protection-row__review")[0];
   assert.match(byClass(details, "protection-review__execution")[0].textContent, /Trigger: bid \/ last.*fill price can differ/);
   assert.match(byClass(details, "protection-review__facts")[0].textContent, /Estimated loss at stop.*€20.*5.0% gap.*€30/);
   const calculations = byClass(details, "protection-row__calculations")[0];
   assert.equal(calculations.open, false);
+  assert.match(calculations.textContent, /Volatility data unavailable; using the configured fallback/);
+  assert.match(protection.protectionCompactMetric({ ...proposal, trail: { initial_stop_price: 90, trailing_amount: 10 } }), /10.0% initial distance/,
+    "a currency trail sized from a percentage is not a native percentage trail");
   assert.equal(byClass(calculations, "protection-row__ladder")[0].tagName, "TABLE");
   review.open = true;
   review.dispatchEvent({ type: "toggle" });

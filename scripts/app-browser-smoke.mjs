@@ -2382,7 +2382,7 @@ async function exerciseProtectionDisclosure(page, bootstrap) {
       rows: sheet.querySelectorAll(".protection-row").length,
       review_open: row.open,
       duplicate_repair: [...sheet.querySelectorAll(".protection-repair__copy b")].some((el) => el.textContent === "SMOKE"),
-      staged_unprotected: row.querySelector("summary").textContent.includes("No working stop · Proposal staged"),
+      staged_unprotected: row.querySelector("summary").textContent.includes("No active stop-loss · Proposal staged"),
       fallback_visible: Boolean(row.querySelector("summary .protection-row__fallback")),
       close_width: close.getBoundingClientRect().width,
       close_height: close.getBoundingClientRect().height,

@@ -7,6 +7,8 @@ import { $, accountBaseCurrency, blockerText, calendarDate, cleanDetail, compact
 import { currentMarketCalendar, marketSessionLabel } from "./shell.js";
 import { state } from "./state.js";
 
+const PROTECTION_PRESET_DISTANCE_NOTE = "Volatility data unavailable; using the configured fallback.";
+
 const PROTECTION_READ_ONLY_REASON = "Read-only preview. Use your paired Canary app for protection actions.";
 
 function renderProtectionPanel(proposals = {}, autoTrade = {}, marketEvents = state.snapshot?.market_events || {}) {
@@ -21,8 +23,16 @@ function renderProtectionPanel(proposals = {}, autoTrade = {}, marketEvents = st
   renderProtectionTimestamp(proposals);
   const theta = protectionThetaSummary(proposals, rows);
   const thetaEl = $("protectionTheta");
-  thetaEl.textContent = hasNumericValue(theta.value) ? money(theta.value, theta.currency) : theta.mixed ? "Mixed" : "--";
+  thetaEl.textContent = hasNumericValue(theta.value) ? money(theta.value, theta.currency) : theta.mixed ? "Mixed" : "Unavailable";
   thetaEl.title = theta.title;
+  const missingTheta = (state.snapshot?.positions?.options || []).filter((row) => !hasNumericValue(row.theta));
+  const optionsClosed = missingTheta.length > 0 && missingTheta.every((row) =>
+    (row.warning_details || []).some((warning) => warning.code === "options_closed"));
+  $("protectionThetaNote").textContent = !hasNumericValue(theta.value)
+    ? theta.mixed ? "No single-currency total available."
+      : optionsClosed ? "Options market closed; option Greeks unavailable."
+        : theta.title
+    : "Time decay associated with proposed option reductions.";
   setMetricTone(thetaEl, hasNumericValue(theta.value) && theta.value > 0 ? "alert" : "neutral");
   const riskExcessEl = $("protectionRiskExcess");
   const riskExcess = protectionRiskExcessSummary(counts);
@@ -34,10 +44,6 @@ function renderProtectionPanel(proposals = {}, autoTrade = {}, marketEvents = st
   noStopEl.textContent = noStop.text;
   noStopEl.title = noStop.title;
   setMetricTone(noStopEl, noStop.risk ? "alert" : "neutral");
-  const unavailable = [];
-  if (!hasNumericValue(theta.value)) unavailable.push("Theta");
-  if (riskExcess.text === "--") unavailable.push("risk excess");
-  $("protectionInputNotice").textContent = unavailable.length ? `${unavailable.join(" and ")} unavailable` : "";
   const defunctEl = $("protectionDataNote");
   const defunctNote = protectionNotProtectableText(currentProtectionCoverage());
   const excluded = (currentProtectionCoverage()?.by_underlying || []).filter((row) => row.state === "not_protectable").length;
@@ -835,7 +841,7 @@ function protectionRow(proposal) {
   const status = document.createElement("span");
   status.className = "protection-row__status";
   const coverage = protectionProposalCoverage(proposal);
-  const coverageText = coverage?.state === "partial" ? "Partly protected" : coverage ? "No working stop" : "";
+  const coverageText = coverage?.state === "partial" ? "Partial stop-loss coverage" : coverage ? "No active stop-loss" : "";
   const staged = blocked || proposal.state === "blocked" ? "Proposal blocked" : "Proposal staged";
   status.textContent = [proposal.option_exit ? protectionBucketLabel(proposal) : "", coverageText, staged].filter(Boolean).join(" · ");
   if (blocked || proposal.state === "blocked") status.classList.add("protection-row__status--blocked");
@@ -847,7 +853,8 @@ function protectionRow(proposal) {
   if (protectionTrailSizingFallback(proposal)) {
     const fallback = document.createElement("span");
     fallback.className = "protection-row__fallback";
-    fallback.textContent = "Fallback trail";
+    fallback.textContent = "Preset stop distance";
+    fallback.title = PROTECTION_PRESET_DISTANCE_NOTE;
     identity.append(fallback);
   }
   if (blocked) {
@@ -902,6 +909,11 @@ function protectionRow(proposal) {
   calculationTitle.textContent = "Calculation details";
   calculationTitle.dataset.protectionFocus = "calculations";
   calculations.append(calculationTitle);
+  if (protectionTrailSizingFallback(proposal)) {
+    const sizingNote = document.createElement("p");
+    sizingNote.textContent = PROTECTION_PRESET_DISTANCE_NOTE;
+    calculations.append(sizingNote);
+  }
   const positionLine = protectionPositionLine(proposal);
   if (positionLine) calculations.append(positionLine);
   const metricText = protectionMetricText(proposal);
@@ -979,7 +991,7 @@ function protectionCompactMetric(proposal = {}) {
   const currency = normalizeCurrency(proposal.contract?.currency);
   return [
     hasNumericValue(stop) ? `Stop ${numberRead(stop)}${currency ? ` ${currency}` : ""}` : "Stop unavailable",
-    hasNumericValue(proposal.trail_sizing?.chosen_pct) ? `${pct(proposal.trail_sizing.chosen_pct)} trail` : protectionTrailOffsetLabel(trail),
+    hasNumericValue(proposal.trail_sizing?.chosen_pct) ? `${pct(proposal.trail_sizing.chosen_pct)} ${hasNumericValue(trail.trailing_percent) ? "trail" : "initial distance"}` : protectionTrailOffsetLabel(trail),
     proposal.tif || "",
   ].filter(Boolean).join(" · ");
 }
@@ -1657,7 +1669,7 @@ function protectionTrailSizingLabel(sizing = {}) {
   const range = protectionTrailSizingRangeLabel(sizing);
   const prefix = range ? `${range}, ` : "";
   if (sizing.fallback) {
-    return `${prefix}${pct(chosen)} fallback trail used (dynamic stop unavailable)`;
+    return `${prefix}${pct(chosen)} preset stop distance`;
   }
   const source = protectionTrailSizingSourceLabel(sizing.selected_by);
   const max = Number(sizing.policy_max_pct || 0);
@@ -2009,7 +2021,10 @@ function protectionRiskExcessSummary(counts = {}) {
       risk: true,
     };
   }
-  return { text: "--", title: "No risk-reduction proposal exposure above target.", risk: false };
+  if (counts.risk_reduction === 0) {
+    return { text: "No risk reduction proposed", title: "No risk-reduction proposals in this snapshot; this is not a portfolio risk verdict.", risk: false };
+  }
+  return { text: "Unavailable", title: "Risk-reduction proposal exposure is unavailable in this snapshot.", risk: false };
 }
 
 function protectionRiskExcessCurrency(counts = {}) {
