@@ -6712,3 +6712,14 @@ p.rules-sheet__provenance {
     transition: none !important;
   }
 }
+
+.edge-learning { display: grid; gap: 10px; margin: 12px 0 18px; color: var(--muted); font-size: 13px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.edge-learning p { margin: 0; }
+.edge-learning__coverage { font-weight: 650; color: var(--ink); }
+.edge-learning__comparisons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.edge-learning__comparisons > div { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.edge-learning summary, .edge-option-cycles summary { cursor: pointer; }
+.edge-option-cycles { margin: 16px 0; font-size: 13px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.edge-option-cycles details { padding: 10px 0; border-top: 1px solid var(--line); }
+.edge-option-cycles h3 { font-size: 15px; margin: 0; }
+@media (max-width: 600px) { .edge-learning__comparisons { grid-template-columns: 1fr; } }

@@ -1,0 +1,217 @@
+package edge
+
+import (
+	"math"
+	"slices"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/osauer/canary/v2/internal/flexstmt"
+)
+
+// OptionCycles describes proven exact-contract positions opened and fully
+// closed inside the review window. It does not infer multi-leg strategies.
+type OptionCycles struct {
+	CompletedCount    int            `json:"completed_count"`
+	CompletePNLCount  int            `json:"complete_pnl_count"`
+	OpenContractCount int            `json:"open_contract_count"`
+	ExcludedContracts int            `json:"excluded_contracts"`
+	Reasons           map[string]int `json:"reasons"`
+	KnownPNLBase      *float64       `json:"known_pnl_base,omitempty"`
+	Cycles            []OptionCycle  `json:"cycles"`
+}
+
+// OptionCycle is a broker-reconciled flat-to-flat exact-contract history.
+type OptionCycle struct {
+	ID                    string    `json:"id"`
+	Symbol                string    `json:"symbol"`
+	Direction             string    `json:"direction"`
+	OpenedAt              time.Time `json:"opened_at"`
+	ClosedAt              time.Time `json:"closed_at"`
+	ExecutionCount        int       `json:"execution_count"`
+	RealizedPNLBase       *float64  `json:"realized_pnl_base,omitempty"`
+	PNLStatus             string    `json:"pnl_status"`
+	MissingEvidence       []string  `json:"missing_evidence"`
+	LinkedProtectionCount int       `json:"linked_protection_count"`
+}
+
+func buildOptionCycles(ev evidence, from, to time.Time, base string, protection map[string]ProtectionRecord, initial map[int64]float64, unbalanced map[int64]bool) OptionCycles {
+	out := OptionCycles{Reasons: map[string]int{}, Cycles: []OptionCycle{}}
+	byContract := map[int64][]flexstmt.Trade{}
+	for _, trade := range ev.trades {
+		if !strings.EqualFold(trade.AssetClass, "OPT") || trade.ConID == 0 || trade.ExecutedAt.After(to) {
+			continue
+		}
+		if trade.LevelOfDetail != "" && trade.LevelOfDetail != "EXECUTION" && trade.LevelOfDetail != "EXECUTIONS" {
+			continue
+		}
+		byContract[trade.ConID] = append(byContract[trade.ConID], trade)
+	}
+	contaminated := map[int64]bool{}
+	for _, event := range ev.optionEvents {
+		contaminated[event.ConID] = true
+	}
+	for _, event := range ev.transfers {
+		contaminated[event.ConID] = true
+	}
+	for _, event := range ev.corporateActions {
+		contaminated[event.ConID] = true
+	}
+	ids := make([]int64, 0, len(byContract))
+	for id := range byContract {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	total, known := 0.0, 0
+	for _, id := range ids {
+		rows := byContract[id]
+		sort.Slice(rows, func(i, j int) bool {
+			if !rows[i].ExecutedAt.Equal(rows[j].ExecutedAt) {
+				return rows[i].ExecutedAt.Before(rows[j].ExecutedAt)
+			}
+			return rows[i].RecordID < rows[j].RecordID
+		})
+		reason := ""
+		switch {
+		case !ev.presentSections["open_positions"] || !ev.presentSections["trades"] || ev.latestOpenPositionDate.IsZero() || optionCycleAnchorUnknown(ev.positions, id):
+			reason = "quantity_anchor_unavailable"
+		case unbalanced[id]:
+			reason = ReasonPositionPathUnbalanced
+		case contaminated[id]:
+			reason = "lifecycle_or_transfer"
+		}
+		if reason == "" {
+			reason = optionCyclePathReason(rows, initial[id])
+		}
+		if reason != "" {
+			out.ExcludedContracts++
+			out.Reasons[reason]++
+			continue
+		}
+		quantity := initial[id]
+		var active []flexstmt.Trade
+		startedFlat := false
+		for _, row := range rows {
+			delta := math.Abs(*row.Quantity)
+			if strings.EqualFold(row.Side, "SELL") {
+				delta = -delta
+			}
+			before := quantity
+			quantity += delta
+			if almostEqual(before, 0) {
+				active = nil
+				startedFlat = true
+			}
+			active = append(active, row)
+			if !almostEqual(quantity, 0) {
+				continue
+			}
+			// A nonzero initial position can close without a retained opening.
+			if !startedFlat || len(active) == 0 || !strings.EqualFold(active[0].OpenClose, "O") {
+				out.Reasons["opening_unproved"]++
+				active = nil
+				continue
+			}
+			if active[0].ExecutedAt.Before(from) {
+				out.Reasons["opened_before_window"]++
+				active = nil
+				continue
+			}
+			cycle := optionCycleFromRows(active, base, ev.fxRates, protection)
+			out.CompletedCount++
+			if cycle.PNLStatus == OptionPNLComplete {
+				out.CompletePNLCount++
+			}
+			if cycle.RealizedPNLBase != nil {
+				total += *cycle.RealizedPNLBase
+				known++
+			}
+			out.Cycles = append(out.Cycles, cycle)
+			active = nil
+		}
+		if !almostEqual(quantity, 0) {
+			out.OpenContractCount++
+		}
+	}
+	if known > 0 {
+		out.KnownPNLBase = &total
+	}
+	sort.Slice(out.Cycles, func(i, j int) bool {
+		a, b := 0.0, 0.0
+		if out.Cycles[i].RealizedPNLBase != nil {
+			a = math.Abs(*out.Cycles[i].RealizedPNLBase)
+		}
+		if out.Cycles[j].RealizedPNLBase != nil {
+			b = math.Abs(*out.Cycles[j].RealizedPNLBase)
+		}
+		if a != b {
+			return a > b
+		}
+		return out.Cycles[i].ID < out.Cycles[j].ID
+	})
+	return out
+}
+
+func optionCyclePathReason(rows []flexstmt.Trade, quantity float64) string {
+	for i, row := range rows {
+		if row.Quantity == nil || row.ExecutedAt.IsZero() || almostEqual(*row.Quantity, 0) || !strings.EqualFold(row.Side, "BUY") && !strings.EqualFold(row.Side, "SELL") {
+			return "execution_path_incomplete"
+		}
+		if i > 0 && row.ExecutedAt.Equal(rows[i-1].ExecutedAt) && !strings.EqualFold(row.Side, rows[i-1].Side) {
+			return "execution_order_ambiguous"
+		}
+		delta := math.Abs(*row.Quantity)
+		if strings.EqualFold(row.Side, "SELL") {
+			delta = -delta
+		}
+		after := quantity + delta
+		opening := almostEqual(quantity, 0) || quantity*delta > 0
+		if opening && !strings.EqualFold(row.OpenClose, "O") || !opening && !strings.EqualFold(row.OpenClose, "C") {
+			return "open_close_conflict"
+		}
+		if !almostEqual(quantity, 0) && quantity*after < 0 && !almostEqual(after, 0) {
+			return "cross_zero_execution"
+		}
+		quantity = after
+	}
+	return ""
+}
+
+func optionCycleFromRows(rows []flexstmt.Trade, base string, rates []flexstmt.FXRate, protection map[string]ProtectionRecord) OptionCycle {
+	first, last := rows[0], rows[len(rows)-1]
+	out := OptionCycle{ID: opaqueID("option-cycle", first.RecordID, last.RecordID), Symbol: first.Symbol, Direction: DirectionLong, OpenedAt: first.ExecutedAt, ClosedAt: last.ExecutedAt, ExecutionCount: len(rows)}
+	if strings.EqualFold(first.Side, "SELL") {
+		out.Direction = DirectionShort
+	}
+	total, known, missing := 0.0, 0, 0
+	reasons := map[string]bool{}
+	for _, row := range rows {
+		if _, ok := protection[row.RecordID]; ok {
+			out.LinkedProtectionCount++
+		}
+		fx := baseConversionFX(row.Currency, base, row.ExecutedAt, row.FXRateToBase, rates)
+		if row.RealizedPNL == nil {
+			missing++
+			reasons[OptionMissingRealizedPNL] = true
+		} else if fx == nil {
+			missing++
+			reasons[OptionMissingFX] = true
+		} else {
+			total += *row.RealizedPNL * *fx
+			known++
+		}
+	}
+	out.RealizedPNLBase, out.PNLStatus = optionPNLState(total, known, missing)
+	out.MissingEvidence = sortedKeys(reasons)
+	return out
+}
+
+func optionCycleAnchorUnknown(positions []flexstmt.OpenPosition, id int64) bool {
+	for _, p := range positions {
+		if p.ConID == id && (p.Quantity == nil || p.ReportDate.IsZero()) {
+			return true
+		}
+	}
+	return false
+}

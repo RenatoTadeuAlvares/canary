@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { withEdgeLearning } from "../web/app/test/edge-learning-fixture.mjs";
 
 import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
@@ -124,7 +125,7 @@ async function runRound4SyntheticSmoke() {
     horizon_sessions: 20,
     automatic_horizon: true,
     horizon_selection: { mode: "automatic", reason: "longest_adequately_covered", eligible_changes: 15, scored_changes: 7, coverage_pct: 46.6666666667, largest_action_sample: 3, minimum_sample: 3, minimum_coverage_pct: 25, adequate: true },
-    headline: "Observed drag: across 3 clean adds, 20-session Decision price impact totaled -453.00 USD; median -151.00 USD.",
+    headline: "Long adds: -453.00 USD price impact across 3 of 3 changes at 20 sessions; median -151.00 USD.",
     market_context: [
       { key: "spy", label: "S&P 500 proxy (SPY)", kind: "market_proxy", sample_count: 3, median_change_pct: 2.1 },
       { key: "qqq", label: "Nasdaq-100 proxy (QQQ)", kind: "market_proxy", sample_count: 3, median_change_pct: 3.2 },
@@ -196,6 +197,7 @@ async function runRound4SyntheticSmoke() {
     last_full_revalidation: now,
     not_execution: true,
   };
+  withEdgeLearning(syntheticEdge);
   const syntheticEdgeChange = {
     id: "change_d189acf9efd2dfe8cf5f69fa",
     symbol: "GAMMA",
@@ -525,6 +527,8 @@ async function runRound4SyntheticSmoke() {
       status: document.getElementById("edgeStatus")?.textContent || "",
       account: document.getElementById("edgeAccountValue")?.textContent || "",
       headline: document.getElementById("edgeHeadline")?.textContent || "",
+      learning: document.getElementById("edgeLearning")?.textContent || "",
+      cycles: document.getElementById("edgeOptionCycles")?.textContent || "",
       matrixRows: document.querySelectorAll("#edgeMatrix .edge-matrix__row").length,
       findings: document.querySelectorAll("#edgeFindings .edge-finding").length,
       findingText: document.getElementById("edgeFindings")?.textContent || "",
@@ -544,6 +548,7 @@ async function runRound4SyntheticSmoke() {
       })(),
       horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     }));
+    if (!edgeView.learning.includes("Same decisions") || !edgeView.cycles.includes("SYN CALL")) throw new Error("Edge learning evidence did not render");
     const edgeDetailRead = page.waitForResponse((response) => {
       if (response.request().method() !== "GET") return false;
       const url = new URL(response.url());

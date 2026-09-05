@@ -1,12 +1,13 @@
 ---
 name: canary
 description: Use Canary through the local `canary` CLI for the daily brief,
-  account and position detail, named-symbol technical analysis, desk policy and
+  account and position detail, historical Edge decision review, named-symbol
+  technical analysis, desk policy and
   rules, protection proposals, option-exercise opportunities, runtime settings,
   and order status or history. Read first; broker writes require an explicit
   transaction-specific request and the gated CLI path.
 allowed-tools: Bash(canary account*) Bash(canary positions*) Bash(canary technical*)
-  Bash(canary brief*) Bash(canary rules*) Bash(canary proposals status*) Bash(canary proposals list*) Bash(canary proposals refresh*) Bash(canary opportunities status*) Bash(canary opportunities list*) Bash(canary opportunities refresh*) Bash(canary settings show*) Bash(canary policy show*) Bash(canary recon show*) Bash(canary trading status*) Bash(canary orders open*) Bash(canary orders history*) Bash(canary order status*)
+  Bash(canary brief*) Bash(canary edge*) Bash(canary rules*) Bash(canary proposals status*) Bash(canary proposals list*) Bash(canary proposals refresh*) Bash(canary opportunities status*) Bash(canary opportunities list*) Bash(canary opportunities refresh*) Bash(canary settings show*) Bash(canary policy show*) Bash(canary recon show*) Bash(canary trading status*) Bash(canary orders open*) Bash(canary orders history*) Bash(canary order status*)
   Bash(canary status*) Bash(canary version*)
 ---
 
@@ -31,6 +32,21 @@ names.
 For an explicitly named stock or ETF, `canary technical SYMBOL --json` returns
 trend, relative strength, ATR, and liquidity evidence. It is analysis, not an
 order-entry path.
+
+## Historical decision review
+
+For what past decisions delivered, use `canary edge --json` or `canary_edge`.
+The default is the automatic one-year review. Preserve action and direction,
+scored/eligible counts, notional coverage, monthly samples and concentration.
+Compare holding horizons through `patterns[].comparisons`, which uses the same
+decisions at both endpoints; the all-sample matrix uses different populations.
+Use returned change or option IDs for the exact calculation trail.
+
+Completed exact-contract option positions, realized episodes and the dated open
+snapshot overlap; never add their P/L. Partial P/L is only a known subtotal.
+Local protection linkage is provenance, not proof of risk effectiveness. Missing
+or changed context leaves purpose unknown. Historical price outcomes do not
+establish skill, imply trade intent or authorize changing risk limits.
 
 ## Evidence rules
 
@@ -67,6 +83,7 @@ read-only QA.
 
 ```sh
 canary brief --json
+canary edge --json
 canary account --json
 canary positions --view risk --json
 canary rules --all --json

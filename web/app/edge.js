@@ -75,6 +75,7 @@ function validEdgeResult(result) {
   const presentContext = new Set(result.market_context.map((row) => row.key));
   const missingContext = new Set(result.market_context_missing);
   if (missingContext.size !== result.market_context_missing.length || result.market_context_missing.some((key) => !EDGE_MARKET_LABELS.has(key) || presentContext.has(key))) return false;
+  if (!validEdgeLearning(result)) return false;
   if (!validEdgeOptionReview(result.options) || !result.coverage || typeof result.coverage !== "object" || !result.method) return false;
   if (result.fingerprint && (result.method.metric !== "Decision price impact" || !String(result.method.headline_selection || "").trim() || !String(result.method.finding_ranking || "").trim() || !String(result.method.materiality_gate || "").trim() || !String(result.method.automatic_horizon || "").trim() || !String(result.method.market_context || "").trim() || result.method.no_causal_claim !== true || result.method.no_predictive_claim !== true || result.method.not_investment_advice !== true)) return false;
   if (result.change != null && !validEdgeChange(result.change)) return false;
@@ -219,10 +220,12 @@ function renderEdge() {
   if (!hasResults) return;
 
   renderEdgeMatrix(result);
+  renderEdgeLearning(result);
   renderEdgeFindings(result);
   renderEdgeChange(result);
   renderEdgeAccount(result);
   renderEdgeOptions(result);
+  renderEdgeOptionCycles(result);
   renderEdgeOptionDetail(result);
   renderEdgeMethod(result);
 }
@@ -435,6 +438,7 @@ function renderEdgeChange(result) {
     ["Contract multiplier", change.multiplier == null ? "—" : edgeQuantity(change.multiplier), false],
     ["Direct costs", edgePrice(change.direct_costs_base, baseCurrency), change.direct_costs_base != null],
     ["Counterfactual", `Leave the pre-trade position at ${edgeQuantity(change.position_before)}`, false],
+    ["Protection context", change.protection_context?.status === "linked" ? `Linked local ${labelize(change.protection_context.bucket)} proposal; not a risk-effectiveness verdict` : "Purpose unknown or incompletely linked", false],
   ];
   $("edgeChangeSummary").replaceChildren(...facts.flatMap(([term, description, sensitive]) => {
     const dt = document.createElement("dt");
@@ -798,3 +802,105 @@ function moneyTone(value) {
 }
 
 export { edgeHasResults, refreshEdge, renderEdge, validEdgeResult };
+
+
+function renderEdgeLearning(result) {
+  const host = $("edgeLearning");
+  const nodes = [];
+  const paragraph = (text, className = "") => {
+    const node = document.createElement("p"); node.textContent = text; node.className = className; return node;
+  };
+  const selection = result.horizon_selection;
+  nodes.push(paragraph(`${selection.scored_changes} of ${selection.eligible_changes} eligible stock/ETF changes reviewed (${Number(selection.coverage_pct).toFixed(0)}%). The rest are not assessed at this horizon.`, "edge-learning__coverage"));
+  if (result.review_note) nodes.push(paragraph(result.review_note));
+  const patterns = result.patterns || [];
+  const selected = patterns.find((p) => p.action === result.review_action && p.direction === result.review_direction);
+  const horizon = selected?.horizons.find((h) => h.sessions === result.horizon_sessions);
+  if (horizon) {
+    const size = horizon.notional_coverage_pct == null ? "Trade-size coverage unavailable: some execution amounts are missing." : `${Number(horizon.notional_coverage_pct).toFixed(0)}% of this group's execution notional is covered.`;
+    nodes.push(paragraph(size));
+    if (horizon.largest_date_share_pct != null) {
+      nodes.push(paragraph(`One execution date accounts for ${Number(horizon.largest_date_share_pct).toFixed(0)}% of absolute price impact; one contract accounts for ${Number(horizon.largest_contract_share_pct).toFixed(0)}%. Without the largest decision: ${edgeMoney(horizon.without_largest_base, edgeCurrency(result))}.`));
+    }
+    if (horizon.months.length) {
+      const months = document.createElement("details");
+      const title = document.createElement("summary"); title.textContent = "Monthly results for these decisions"; months.append(title);
+      for (const month of horizon.months) months.append(paragraph(`${month.month}: ${month.sample_count} decisions · total ${edgeMoney(month.total_base, edgeCurrency(result))} · median ${edgeMoney(month.median_base, edgeCurrency(result))}.`));
+      nodes.push(months);
+    }
+    const comparisons = document.createElement("div"); comparisons.className = "edge-learning__comparisons";
+    for (const comparison of selected.comparisons) {
+      const card = document.createElement("div");
+      const title = document.createElement("strong"); title.textContent = `Same decisions · ${comparison.earlier_sessions} → ${comparison.later_sessions} sessions`;
+      card.append(title);
+      card.append(paragraph(comparison.sample_count ? `${comparison.sample_count} matched decisions: ${edgeMoney(comparison.earlier_total_base, edgeCurrency(result))} → ${edgeMoney(comparison.later_total_base, edgeCurrency(result))}. Median change: ${edgeMoney(comparison.median_difference_base, edgeCurrency(result))}.` : "No common sample available."));
+      if (comparison.sample_count > 0 && comparison.sample_count < 3) card.append(paragraph("Too few matched decisions for a repeated observation."));
+      comparisons.append(card);
+    }
+    nodes.push(comparisons);
+    nodes.push(paragraph(`Risk context: ${horizon.linked_protection_count} decisions linked to a local protection proposal, ${horizon.partial_protection_count} partially linked. Remaining purpose unknown. ${result.protection_state === "changed" ? "Local records changed; prior links are withheld." : result.protection_state === "unavailable" ? "Local protection evidence is unavailable." : "A price outcome does not show whether protection was effective."}`));
+  }
+  if (patterns.length) {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary"); summary.textContent = "Coverage by action and direction"; details.append(summary);
+    for (const p of patterns) {
+      const h = p.horizons.find((row) => row.sessions === result.horizon_sessions);
+      if (h) details.append(paragraph(`${labelize(p.direction)} ${labelize(p.action)}: ${h.sample_count}/${p.eligible_changes} changes; ${Object.entries(h.exclusions).map(([key, count]) => `${count} ${labelize(key)}`).join(", ") || "none excluded"}.`));
+    }
+    nodes.push(details);
+    nodes.push(paragraph("The matrix below uses different samples at each horizon. Use the matched comparisons above to compare later closes."));
+  }
+  host.replaceChildren(...nodes);
+}
+
+function renderEdgeOptionCycles(result) {
+  const host = $("edgeOptionCycles"); const review = result.options?.cycles;
+  if (!review) { host.replaceChildren(); return; }
+  const heading = document.createElement("h3"); heading.textContent = "Completed option positions";
+  const summary = document.createElement("p"); summary.textContent = `${review.completed_count} proven opening-to-closing contract positions; ${review.complete_pnl_count} with complete P/L. ${review.open_contract_count} contracts still open; ${review.excluded_contracts} contracts could not be reconstructed.`;
+  const note = document.createElement("p"); note.textContent = "A subset of realized activity below, not extra P/L. Each row is one exact contract, not an inferred multi-leg strategy.";
+  const rows = (review.cycles || []).map((row) => {
+    const details = document.createElement("details");
+    const title = document.createElement("summary"); title.textContent = `${row.symbol} · ${labelize(row.direction)} · ${edgeMoney(row.realized_pnl_base, edgeCurrency(result))} · ${edgeOptionEvidenceText(row.pnl_status, row.missing_evidence)}`;
+    const facts = document.createElement("p"); facts.textContent = `${calendarDateTime(row.opened_at)} → ${calendarDateTime(row.closed_at)} · ${row.execution_count} executions · ${labelize(row.pnl_status)} P/L · ${row.linked_protection_count} executions linked to local protection.`;
+    details.append(title, facts); return details;
+  });
+  if (review.truncated) { const more = document.createElement("p"); more.textContent = `Showing ${rows.length} of ${review.completed_count} completed positions.`; rows.push(more); }
+  const gaps = document.createElement("p");
+  gaps.textContent = Object.entries(review.reasons || {}).map(([key, count]) => `${count} ${labelize(key)}`).join("; ");
+  if (gaps.textContent) gaps.textContent = `Reconstruction gaps: ${gaps.textContent}. Opening/window exclusions count positions; other exclusions count contracts.`;
+  host.replaceChildren(heading, summary, note, gaps, ...rows);
+}
+
+
+function validEdgeLearning(result) {
+  const patterns = result.patterns ?? [];
+  if (!Array.isArray(patterns) || patterns.length > 8) return false;
+  const seen = new Set();
+  for (const p of patterns) {
+    if (!p || typeof p !== "object") return false;
+    const key = `${p.action}/${p.direction}`;
+    if (!EDGE_ACTIONS.includes(p.action) || !["long", "short"].includes(p.direction) || seen.has(key) || !validEdgeCount(p.eligible_changes) || p.eligible_changes === 0 || !validEdgeCount(p.notional_known_count) || p.notional_known_count > p.eligible_changes || !Array.isArray(p.horizons) || p.horizons.length !== 3 || !Array.isArray(p.comparisons) || p.comparisons.length !== 2) return false;
+    seen.add(key);
+    if (!p.horizons.every((h) => h && typeof h === "object") || new Set(p.horizons.map((h) => h.sessions)).size !== 3) return false;
+    for (const h of p.horizons) {
+      if (!EDGE_HORIZONS.has(h.sessions) || !validEdgeCount(h.sample_count) || h.sample_count > p.eligible_changes || !Array.isArray(h.months) || !h.exclusions || typeof h.exclusions !== "object") return false;
+      if (![h.positive_count, h.negative_count, h.flat_count, h.linked_protection_count, h.partial_protection_count, h.distinct_dates, h.distinct_contracts].every(validEdgeCount)) return false;
+      if (h.positive_count + h.negative_count + h.flat_count !== h.sample_count || h.linked_protection_count + h.partial_protection_count > h.sample_count) return false;
+      if (![h.total_base, h.median_base, h.median_impact_pct, h.scored_notional_base, h.without_largest_base].every((n) => n == null || hasNumericValue(n))) return false;
+      if ((h.sample_count > 0) !== hasNumericValue(h.total_base) || (h.sample_count > 0) !== hasNumericValue(h.median_base)) return false;
+      if (![h.notional_coverage_pct, h.largest_date_share_pct, h.largest_contract_share_pct].every((n) => n == null || hasNumericValue(n) && n >= 0 && n <= 100.000000001)) return false;
+      if (!Object.values(h.exclusions).every(validEdgeCount) || Object.values(h.exclusions).reduce((a, b) => a + b, h.sample_count) !== p.eligible_changes) return false;
+      if (!h.months.every((m) => m && /^\d{4}-\d{2}$/.test(m.month) && validEdgeCount(m.sample_count) && hasNumericValue(m.total_base) && hasNumericValue(m.median_base))) return false;
+    }
+    for (const c of p.comparisons) {
+      if (!c || c.earlier_sessions !== 1 || ![5, 20].includes(c.later_sessions) || !validEdgeCount(c.sample_count) || c.sample_count > p.eligible_changes) return false;
+      if (![c.earlier_total_base, c.later_total_base, c.difference_base, c.median_difference_base].every((n) => (c.sample_count > 0) === hasNumericValue(n))) return false;
+    }
+  }
+  if (result.review_action && !seen.has(`${result.review_action}/${result.review_direction}`)) return false;
+  const cycles = result.options?.cycles;
+  if (!cycles) return true;
+  if (![cycles.completed_count, cycles.complete_pnl_count, cycles.open_contract_count, cycles.excluded_contracts].every(validEdgeCount) || !Array.isArray(cycles.cycles) || cycles.cycles.length > 20 || cycles.cycles.length > cycles.completed_count || Boolean(cycles.truncated) !== (cycles.cycles.length < cycles.completed_count)) return false;
+  return cycles.cycles.every((c) => String(c.id || "").startsWith("option-cycle_") && String(c.symbol || "").trim() && ["long", "short"].includes(c.direction) && String(c.opened_at || "").trim() && String(c.closed_at || "").trim() && validEdgeCount(c.execution_count) && c.execution_count >= 2 && validEdgeCount(c.linked_protection_count) && c.linked_protection_count <= c.execution_count && validEdgeOptionPNL(c.pnl_status, c.realized_pnl_base, c.missing_evidence));
+}

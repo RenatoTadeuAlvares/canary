@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -75,6 +76,7 @@ func renderEdgeText(out io.Writer, result rpc.EdgeResult) {
 	if result.Headline != "" {
 		fmt.Fprintln(out, "  "+result.Headline)
 	}
+	renderEdgeLearning(out, result)
 	if len(result.MarketContext) > 0 || len(result.MarketContextMissing) > 0 {
 		parts := make([]string, 0, len(result.MarketContext)+len(result.MarketContextMissing))
 		for _, context := range result.MarketContext {
@@ -111,6 +113,7 @@ func renderEdgeText(out io.Writer, result rpc.EdgeResult) {
 		}
 		fmt.Fprintf(out, "  %s (%+.2f%%)  %s %s · %s%s\n", edgeMoney(finding.DecisionImpactBase, edgeBaseCurrency(result)), finding.DecisionImpactPct, finding.Symbol, finding.Action, finding.ChangeID, context)
 	}
+	renderEdgeOptionCycles(out, result)
 	renderEdgeOptions(out, result)
 	fmt.Fprintf(out, "  Coverage  %d/%d eligible · scored %d/%d eligible at %s (%.1f%%) · largest action n=%d", result.Coverage.EligibleChanges, result.Coverage.TradeChanges, result.HorizonSelection.ScoredChanges, result.HorizonSelection.EligibleChanges, edgeSessionCount(result.HorizonSessions), result.HorizonSelection.CoveragePct, result.HorizonSelection.LargestActionSample)
 	if !result.LastFullRevalidation.IsZero() {
@@ -397,4 +400,71 @@ func edgeMoney(value float64, currency string) string {
 		currency = "BASE"
 	}
 	return fmt.Sprintf("%s %+.2f", strings.ToUpper(currency), value)
+}
+
+func renderEdgeLearning(out io.Writer, result rpc.EdgeResult) {
+	selection := result.HorizonSelection
+	fmt.Fprintf(out, "  Review coverage  %d of %d eligible stock/ETF changes scored (%.1f%%); the remaining changes are not assessed at this horizon.\n", selection.ScoredChanges, selection.EligibleChanges, selection.CoveragePct)
+	if result.ReviewNote != "" {
+		fmt.Fprintln(out, "  "+result.ReviewNote)
+	}
+	for _, p := range result.Patterns {
+		if p.Action != result.ReviewAction || p.Direction != result.ReviewDirection {
+			continue
+		}
+		for _, h := range p.Horizons {
+			if h.Sessions != result.HorizonSessions {
+				continue
+			}
+			notional := "unavailable: incomplete execution amounts"
+			if h.NotionalCoveragePct != nil {
+				notional = fmt.Sprintf("%.1f%% of execution notional", *h.NotionalCoveragePct)
+			}
+			fmt.Fprintf(out, "  Selected sample  %d/%d changes; size coverage %s\n", h.SampleCount, p.EligibleChanges, notional)
+			if h.LargestDateSharePct != nil && h.LargestContractSharePct != nil && h.WithoutLargestBase != nil {
+				fmt.Fprintf(out, "  Concentration  largest date %.1f%%, largest contract %.1f%% of absolute impact; without largest decision %s\n", *h.LargestDateSharePct, *h.LargestContractSharePct, edgeMoney(*h.WithoutLargestBase, edgeBaseCurrency(result)))
+			}
+			for _, m := range h.Months {
+				fmt.Fprintf(out, "    %s · %d decisions · total %s · median %s\n", m.Month, m.SampleCount, edgeMoney(m.TotalBase, edgeBaseCurrency(result)), edgeMoney(m.MedianBase, edgeBaseCurrency(result)))
+			}
+			fmt.Fprintf(out, "  Risk context  %d linked protection, %d partial; remaining purpose unknown. Local context %s. Price outcome does not grade risk management.\n", h.LinkedProtectionCount, h.PartialProtectionCount, result.ProtectionState)
+		}
+		for _, c := range p.Comparisons {
+			if c.SampleCount == 0 {
+				fmt.Fprintf(out, "  Same decisions · %d→%d sessions  no common sample\n", c.EarlierSessions, c.LaterSessions)
+				continue
+			}
+			fmt.Fprintf(out, "  Same decisions · %d→%d sessions  n=%d; %s → %s; median paired change %s\n", c.EarlierSessions, c.LaterSessions, c.SampleCount, edgeMoney(*c.EarlierTotalBase, edgeBaseCurrency(result)), edgeMoney(*c.LaterTotalBase, edgeBaseCurrency(result)), edgeMoney(*c.MedianDifferenceBase, edgeBaseCurrency(result)))
+		}
+	}
+	if len(result.Patterns) > 0 {
+		fmt.Fprintln(out, "  The all-sample matrix below uses different decision sets; use the matched comparisons for horizon differences.")
+	}
+}
+
+func renderEdgeOptionCycles(out io.Writer, result rpc.EdgeResult) {
+	c := result.Options.Cycles
+	if c.Reasons == nil {
+		return
+	}
+	fmt.Fprintf(out, "  Options · completed positions  %d proven flat-to-flat contract cycles; %d complete P/L; %d contracts still open; %d contracts excluded\n", c.CompletedCount, c.CompletePNLCount, c.OpenContractCount, c.ExcludedContracts)
+	if len(c.Reasons) > 0 {
+		reasons := make([]string, 0, len(c.Reasons))
+		for reason, count := range c.Reasons {
+			reasons = append(reasons, fmt.Sprintf("%d %s", count, strings.ReplaceAll(reason, "_", " ")))
+		}
+		sort.Strings(reasons)
+		fmt.Fprintf(out, "  Reconstruction gaps  %s. Opening/window exclusions count positions; other exclusions count contracts.\n", strings.Join(reasons, "; "))
+	}
+	for i, row := range c.Cycles {
+		if i == 3 {
+			break
+		}
+		amount := "unavailable"
+		if row.RealizedPNLBase != nil {
+			amount = edgeMoney(*row.RealizedPNLBase, edgeBaseCurrency(result))
+		}
+		fmt.Fprintf(out, "    %s · %s %s · %s → %s · %d executions · %s\n", amount, row.Direction, row.Symbol, row.OpenedAt.Format(time.DateOnly), row.ClosedAt.Format(time.DateOnly), row.ExecutionCount, row.PNLStatus)
+	}
+	fmt.Fprintln(out, "  Completed positions are a subset of realized activity, not an additional P/L total or inferred multi-leg strategy.")
 }

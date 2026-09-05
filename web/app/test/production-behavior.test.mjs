@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
+import { withEdgeLearning } from "./edge-learning-fixture.mjs";
 
 import { FakeElement, createDOMHarness } from "./dom-harness.mjs";
 
@@ -241,6 +242,7 @@ test("Edge opens as an automatic one-year review and explains findings without t
     },
     fingerprint: "edge_safe", not_execution: true,
   };
+  withEdgeLearning(result);
   const change = {
     id: "change_safe", symbol: "SYN", asset_class: "stock", currency: "EUR", action: "add", direction: "long",
     executed_at: "2026-07-01T14:00:00Z", delta_quantity: 10, position_before: 20, position_after: 30,
@@ -260,6 +262,8 @@ test("Edge opens as an automatic one-year review and explains findings without t
     },
   };
   assert.equal(edge.validEdgeResult(result), true);
+  assert.equal(edge.validEdgeResult({ ...result, patterns: [{ ...result.patterns[0], eligible_changes: -1 }] }), false);
+  assert.equal(edge.validEdgeResult({ ...result, patterns: [{ ...result.patterns[0], horizons: [] }] }), false);
   assert.equal(edge.validEdgeResult({ ...result, change }), true);
   assert.equal(edge.validEdgeResult({ ...result, option }), true);
   assert.equal(edge.validEdgeResult({ ...result, change: { ...change, id: "broker-order" } }), false);
@@ -274,6 +278,12 @@ test("Edge opens as an automatic one-year review and explains findings without t
   };
   state.authenticated = true;
   assert.equal(await edge.refreshEdge(), true);
+  assert.match(dom.element("edgeLearning").textContent, /Same decisions/);
+  assert.match(dom.element("edgeLearning").textContent, /Monthly results/);
+  assert.match(dom.element("edgeLearning").textContent, /not proof of skill/);
+  assert.match(dom.element("edgeOptionCycles").textContent, /Completed option positions/);
+  assert.match(dom.element("edgeOptionCycles").textContent, /SYN CALL/);
+  assert.match(dom.element("edgeOptionCycles").children[4].children[0].textContent, /Partial/);
   assert.deepEqual(requests, ["/api/edge"]);
   assert.equal(dom.element("edgeImpactLens").textContent, "One year · automatic · 20-session headline");
   assert.match(dom.element("edgeMarketContext").textContent, /S&P 500 proxy \(SPY\) \+2\.10%/);

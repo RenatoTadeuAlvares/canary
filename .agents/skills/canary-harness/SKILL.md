@@ -1,13 +1,13 @@
 ---
 name: canary-harness
-description: Use the repo-local Canary MCP/CLI for Interactive Brokers account, market, rulebook, stress, proposal, opportunity, and order investigations while developing the trading harness. Read/preview first; explicit current-turn broker writes use only the gated CLI.
+description: Use the repo-local Canary MCP/CLI for Interactive Brokers account, market, Edge performance review, rulebook, stress, proposal, opportunity, and order investigations while developing the trading harness. Read/preview first; explicit current-turn broker writes use only the gated CLI.
 ---
 
-Updated: 2026-07-24 08:40 CEST
+Updated: 2026-09-05
 
 ## Contract
 
-Use the typed `canary` MCP tools for read-only brief, account, positions,
+Use the typed `canary` MCP tools for read-only brief, Edge review, account, positions,
 rulebook, named-symbol technical, proposal, opportunity, settings, trading,
 health, and order-status/history work. Use `canary ... --json` when MCP is
 unavailable, a CLI-only policy/reconciliation diagnostic is required, or the

@@ -24,7 +24,7 @@ import (
 const (
 	edgePublicationStateKind = "edge_publication"
 	edgeBarCacheStateKind    = "edge_bar_cache"
-	edgePublicationVersion   = 3
+	edgePublicationVersion   = 4
 	edgeBarCacheVersion      = 3
 	edgeDailyLookbackDays    = 35
 	edgeFullLookbackDays     = 400
@@ -34,15 +34,17 @@ const (
 )
 
 type edgePublication struct {
-	Version              int                        `json:"version"`
-	ScopeFingerprint     string                     `json:"scope_fingerprint"`
-	State                string                     `json:"state"`
-	Reason               string                     `json:"reason,omitempty"`
-	MissingRequirements  []string                   `json:"missing_requirements,omitempty"`
-	EvidenceFingerprint  string                     `json:"evidence_fingerprint,omitempty"`
-	Windows              map[string]edgecore.Result `json:"windows,omitempty"`
-	LastFullRevalidation time.Time                  `json:"last_full_revalidation,omitzero"`
-	UpdatedAt            time.Time                  `json:"updated_at"`
+	LocalContextFingerprint string                     `json:"local_context_fingerprint,omitempty"`
+	LocalContextAsOf        time.Time                  `json:"local_context_as_of,omitzero"`
+	Version                 int                        `json:"version"`
+	ScopeFingerprint        string                     `json:"scope_fingerprint"`
+	State                   string                     `json:"state"`
+	Reason                  string                     `json:"reason,omitempty"`
+	MissingRequirements     []string                   `json:"missing_requirements,omitempty"`
+	EvidenceFingerprint     string                     `json:"evidence_fingerprint,omitempty"`
+	Windows                 map[string]edgecore.Result `json:"windows,omitempty"`
+	LastFullRevalidation    time.Time                  `json:"last_full_revalidation,omitzero"`
+	UpdatedAt               time.Time                  `json:"updated_at"`
 }
 
 type edgeBarCache struct {
@@ -252,13 +254,15 @@ func (s *Server) rebuildEdgePublication(ctx context.Context) error {
 	for symbol, series := range cache.MarketContext {
 		contextBars[symbol] = append([]edgecore.DailyBar(nil), series.Bars...)
 	}
+	localEvents, localProposals, localFingerprint := s.edgeProtectionEvidence(ctx, scope)
+	protectionRecords := matchEdgeProtectionRecords(scope, statements, localEvents, localProposals)
 	baseCurrency := inferEdgeBaseCurrency(statements)
 	windows := make(map[string]edgecore.Result, 2)
 	for _, window := range []struct {
 		key  string
 		days int
 	}{{"90d", 90}, {"365d", 365}} {
-		result, analyzeErr := edgecore.Analyze(edgecore.Input{WindowDays: window.days, BaseCurrency: baseCurrency, Statements: statements, Bars: bars, ContextBars: contextBars})
+		result, analyzeErr := edgecore.Analyze(edgecore.Input{WindowDays: window.days, BaseCurrency: baseCurrency, Statements: statements, Bars: bars, ContextBars: contextBars, ProtectionRecords: protectionRecords})
 		if analyzeErr != nil {
 			return analyzeErr
 		}
@@ -269,7 +273,7 @@ func (s *Server) rebuildEdgePublication(ctx context.Context) error {
 		return nil
 	}
 	lastFull := oldestEdgeRevalidation(acquisition.LastFullRevalidation, cache.LastFullRevalidation)
-	return s.saveEdgePublication(ctx, edgePublication{Version: edgePublicationVersion, ScopeFingerprint: scopeFingerprint, State: state, Reason: reason, EvidenceFingerprint: evidenceFingerprint, Windows: windows, LastFullRevalidation: lastFull, UpdatedAt: s.edgeNow()})
+	return s.saveEdgePublication(ctx, edgePublication{Version: edgePublicationVersion, ScopeFingerprint: scopeFingerprint, State: state, Reason: reason, EvidenceFingerprint: evidenceFingerprint, Windows: windows, LocalContextFingerprint: localFingerprint, LocalContextAsOf: now, LastFullRevalidation: lastFull, UpdatedAt: s.edgeNow()})
 }
 
 // edgeBarRefreshPlan keeps full-history authority at contract granularity.
@@ -918,6 +922,17 @@ func (s *Server) handleEdgeSnapshot(ctx context.Context, req *rpc.Request) (*rpc
 			return nil, errBadRequest("edge option id was not found in this window")
 		}
 	}
+	_, _, localFingerprint := s.edgeProtectionEvidence(ctx, scope)
+	result.ProtectionAsOf = publication.LocalContextAsOf
+	result.ProtectionState = "current"
+	if publication.LocalContextFingerprint == "" || localFingerprint == "" {
+		result.ProtectionState = "unavailable"
+	} else if publication.LocalContextFingerprint != localFingerprint {
+		result.ProtectionState = "changed"
+	}
+	if result.ProtectionState != "current" {
+		withholdEdgeProtectionContext(result)
+	}
 	if err := rpc.ValidateEdgeResult(*result); err != nil {
 		return nil, fmt.Errorf("invalid Edge publication: %w", err)
 	}
@@ -979,23 +994,11 @@ func populateRPCEdgeResult(out *rpc.EdgeResult, in edgecore.Result, horizon, lim
 		}
 		out.Findings = append(out.Findings, rpc.EdgeFinding{ChangeID: finding.ChangeID, Symbol: finding.Symbol, Action: finding.Action, Direction: finding.Direction, ExecutedAt: finding.ExecutedAt, HorizonSessions: finding.HorizonSessions, DecisionNotionalBase: finding.DecisionNotionalBase, DecisionImpactBase: finding.DecisionImpactBase, DecisionImpactPct: finding.DecisionImpactPct, MarketContext: rpcEdgeMarketContext(finding.MarketContext)})
 	}
+	out.Patterns = make([]rpc.EdgeDecisionPattern, 0, len(in.Patterns))
+	for _, pattern := range in.Patterns {
+		out.Patterns = append(out.Patterns, rpcEdgeDecisionPattern(pattern))
+	}
 	out.Options = rpcEdgeOptionReview(in.Options)
-	_, selected := headlineEdgeActionHorizon(out)
-	if selected == nil {
-		_, selected = selectedEdgeActionHorizon(out)
-	}
-	if selected != nil {
-		out.MarketContext = append([]rpc.EdgeMarketContextRollup(nil), selected.MarketContext...)
-		present := make(map[string]bool, len(out.MarketContext))
-		for _, context := range out.MarketContext {
-			present[context.Key] = true
-		}
-		for _, benchmark := range edgecore.MarketBenchmarks() {
-			if !present[benchmark.Key] {
-				out.MarketContextMissing = append(out.MarketContextMissing, benchmark.Key)
-			}
-		}
-	}
 	out.Headline = edgeHeadline(out)
 }
 
@@ -1039,21 +1042,15 @@ func edgeHorizonSelection(in edgecore.Result, horizon int, automatic bool) rpc.E
 }
 
 func edgeHeadline(result *rpc.EdgeResult) string {
-	selected, selectedHorizon := headlineEdgeActionHorizon(result)
-	if selected != nil && selectedHorizon != nil && result.HorizonSelection.Adequate {
-		currency := "base"
-		if result.Account.BaseCurrency != "" {
-			currency = result.Account.BaseCurrency
-		}
-		pattern := "Mixed observed pattern"
-		switch {
-		case *selectedHorizon.TotalBase > 0 && *selectedHorizon.MedianBase > 0:
-			pattern = "Observed strength"
-		case *selectedHorizon.TotalBase < 0 && *selectedHorizon.MedianBase < 0:
-			pattern = "Observed drag"
-		}
-		return fmt.Sprintf("%s: across %d clean %s, %d-session Decision price impact totaled %+.2f %s; median %+.2f %s.", pattern, selectedHorizon.SampleCount, edgeActionPlural(selected.Action), result.HorizonSessions, *selectedHorizon.TotalBase, currency, *selectedHorizon.MedianBase, currency)
-	}
+	result.ReviewAction, result.ReviewDirection, result.ReviewNote = "", "", ""
+	result.MarketContext = nil
+	result.MarketContextMissing = nil
+	result.Headline = edgeUnselectedHeadline(result)
+	populateEdgeLearningSummary(result)
+	return result.Headline
+}
+
+func edgeUnselectedHeadline(result *rpc.EdgeResult) string {
 	if slices.Contains(result.Coverage.MissingSections, "trades") {
 		return "The completed one-year broker report returned no Trades section, so Canary cannot reconstruct past decisions. If this account traded during the period, verify Trades at execution detail in the saved Activity Flex Query; otherwise there is no trade history to score."
 	}
@@ -1064,49 +1061,7 @@ func edgeHeadline(result *rpc.EdgeResult) string {
 	if result.Account == nil || result.Account.StartingEquityBase <= 0 {
 		return fmt.Sprintf("No repeated %d-session pattern can clear the account-relative materiality gate because starting equity is unavailable; %d of %d eligible changes were scored.", result.HorizonSessions, selection.ScoredChanges, selection.EligibleChanges)
 	}
-	return fmt.Sprintf("No repeated %d-session pattern clears the evidence and account-materiality gates: %d of %d eligible changes were scored; the largest action sample is %d and at least %d is required.", result.HorizonSessions, selection.ScoredChanges, selection.EligibleChanges, selection.LargestActionSample, selection.MinimumSample)
-}
-
-func headlineEdgeActionHorizon(result *rpc.EdgeResult) (*rpc.EdgeActionRollup, *rpc.EdgeHorizonRollup) {
-	if result.Account == nil || result.Account.StartingEquityBase <= 0 {
-		return nil, nil
-	}
-	var selected *rpc.EdgeActionRollup
-	var selectedHorizon *rpc.EdgeHorizonRollup
-	for i := range result.ActionRollups {
-		for j := range result.ActionRollups[i].Horizons {
-			candidate := &result.ActionRollups[i].Horizons[j]
-			if candidate.Sessions != result.HorizonSessions || candidate.SampleCount < edgecore.MinimumPatternSample || candidate.TotalBase == nil || candidate.MedianBase == nil {
-				continue
-			}
-			totalPct := math.Abs(*candidate.TotalBase) / result.Account.StartingEquityBase * 100
-			medianPct := math.Abs(*candidate.MedianBase) / result.Account.StartingEquityBase * 100
-			if totalPct < edgecore.MinimumPatternTotalImpactEquityPct || medianPct < edgecore.MinimumFindingImpactEquityPct {
-				continue
-			}
-			if selectedHorizon == nil || candidate.SampleCount > selectedHorizon.SampleCount {
-				selected, selectedHorizon = &result.ActionRollups[i], candidate
-			}
-		}
-	}
-	return selected, selectedHorizon
-}
-
-func selectedEdgeActionHorizon(result *rpc.EdgeResult) (*rpc.EdgeActionRollup, *rpc.EdgeHorizonRollup) {
-	var selected *rpc.EdgeActionRollup
-	var selectedHorizon *rpc.EdgeHorizonRollup
-	for i := range result.ActionRollups {
-		for j := range result.ActionRollups[i].Horizons {
-			candidate := &result.ActionRollups[i].Horizons[j]
-			if candidate.Sessions != result.HorizonSessions || candidate.SampleCount == 0 || candidate.TotalBase == nil || candidate.MedianBase == nil {
-				continue
-			}
-			if selectedHorizon == nil || candidate.SampleCount > selectedHorizon.SampleCount {
-				selected, selectedHorizon = &result.ActionRollups[i], candidate
-			}
-		}
-	}
-	return selected, selectedHorizon
+	return fmt.Sprintf("No repeated %d-session pattern clears the evidence and account-materiality gates: %d of %d eligible changes were scored; the largest action sample is %d; at least %d is required within one action and direction.", result.HorizonSessions, selection.ScoredChanges, selection.EligibleChanges, selection.LargestActionSample, selection.MinimumSample)
 }
 
 func edgeActionPlural(action string) string {
@@ -1133,6 +1088,7 @@ func rpcEdgeAccount(in *edgecore.AccountResult) *rpc.EdgeAccountResult {
 
 func rpcEdgeOptionReview(in edgecore.OptionReview) rpc.EdgeOptionReview {
 	out := rpc.EdgeOptionReview{
+		Cycles: rpcEdgeOptionCycles(in.Cycles),
 		Coverage: rpc.EdgeOptionCoverage{
 			ExecutionEpisodes: in.Coverage.ExecutionEpisodes, OpeningEpisodes: in.Coverage.OpeningEpisodes,
 			OpeningOnlyZeroEpisodes: in.Coverage.OpeningOnlyZeroEpisodes, ClosingEpisodes: in.Coverage.ClosingEpisodes,
@@ -1282,7 +1238,7 @@ func rpcEdgeOptionOpenDetail(in edgecore.OptionOpenPosition) rpc.EdgeOptionOpenP
 }
 
 func rpcEdgeChange(in edgecore.Change) *rpc.EdgeChangeDetail {
-	out := &rpc.EdgeChangeDetail{ID: in.ID, Symbol: in.Symbol, AssetClass: in.AssetClass, Currency: in.Currency, Action: in.Action, Direction: in.Direction, ExecutedAt: in.ExecutedAt, DeltaQuantity: in.DeltaQuantity, PositionBefore: in.PositionBefore, PositionAfter: in.PositionAfter, ExecutionVWAP: cloneAmount(in.ExecutionVWAP), Multiplier: cloneAmount(in.Multiplier), DirectCostsBase: cloneAmount(in.DirectCostsBase)}
+	out := &rpc.EdgeChangeDetail{ProtectionContext: rpcEdgeProtectionContext(in.ProtectionContext), ID: in.ID, Symbol: in.Symbol, AssetClass: in.AssetClass, Currency: in.Currency, Action: in.Action, Direction: in.Direction, ExecutedAt: in.ExecutedAt, DeltaQuantity: in.DeltaQuantity, PositionBefore: in.PositionBefore, PositionAfter: in.PositionAfter, ExecutionVWAP: cloneAmount(in.ExecutionVWAP), Multiplier: cloneAmount(in.Multiplier), ExecutionNotionalBase: cloneAmount(in.ExecutionNotionalBase), DirectCostsBase: cloneAmount(in.DirectCostsBase)}
 	for _, score := range in.Scores {
 		row := rpc.EdgeHorizonScore{Sessions: score.Sessions, HorizonClose: cloneAmount(score.HorizonClose), HorizonFX: cloneAmount(score.HorizonFX), DecisionNotionalBase: cloneAmount(score.DecisionNotionalBase), DecisionImpactBase: cloneAmount(score.DecisionImpactBase), DecisionImpactPct: cloneAmount(score.DecisionImpactPct), MarketContext: rpcEdgeMarketContext(score.MarketContext), Reason: score.Reason}
 		if score.HorizonDay != nil {

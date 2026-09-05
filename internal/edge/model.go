@@ -115,29 +115,31 @@ type DailyBar struct {
 // Input contains only typed, already-retained broker evidence and regenerable
 // daily bars. WindowDays is 90 or 365.
 type Input struct {
-	AsOf         time.Time
-	WindowDays   int
-	BaseCurrency string
-	Statements   []flexstmt.Statement
-	Bars         map[int64][]DailyBar
-	ContextBars  map[string][]DailyBar
+	AsOf              time.Time
+	WindowDays        int
+	BaseCurrency      string
+	Statements        []flexstmt.Statement
+	Bars              map[int64][]DailyBar
+	ContextBars       map[string][]DailyBar
+	ProtectionRecords map[string]ProtectionRecord
 }
 
 // Result is the complete deterministic core result for one window. Public
 // adapters translate it into rpc.EdgeResult and never recalculate it.
 type Result struct {
-	SchemaVersion string         `json:"schema_version"`
-	AsOf          time.Time      `json:"as_of"`
-	WindowDays    int            `json:"window_days"`
-	Account       *AccountResult `json:"account,omitempty"`
-	Rollups       []ActionRollup `json:"rollups"`
-	Findings      []Finding      `json:"findings"`
-	Changes       []Change       `json:"changes"`
-	Options       OptionReview   `json:"options"`
-	Coverage      Coverage       `json:"coverage"`
-	Method        Method         `json:"method"`
-	Fingerprint   string         `json:"fingerprint"`
-	NotExecution  bool           `json:"not_execution"`
+	SchemaVersion string            `json:"schema_version"`
+	AsOf          time.Time         `json:"as_of"`
+	WindowDays    int               `json:"window_days"`
+	Account       *AccountResult    `json:"account,omitempty"`
+	Rollups       []ActionRollup    `json:"rollups"`
+	Findings      []Finding         `json:"findings"`
+	Changes       []Change          `json:"changes"`
+	Patterns      []DecisionPattern `json:"patterns"`
+	Options       OptionReview      `json:"options"`
+	Coverage      Coverage          `json:"coverage"`
+	Method        Method            `json:"method"`
+	Fingerprint   string            `json:"fingerprint"`
+	NotExecution  bool              `json:"not_execution"`
 }
 
 // AccountResult is the complete base-currency equity change after confirmed
@@ -156,21 +158,23 @@ type AccountResult struct {
 
 // Change is one deterministically classified exact-contract position change.
 type Change struct {
-	ID              string         `json:"id"`
-	ConID           int64          `json:"-"`
-	Symbol          string         `json:"symbol"`
-	AssetClass      string         `json:"asset_class"`
-	Currency        string         `json:"currency,omitempty"`
-	Action          string         `json:"action"`
-	Direction       string         `json:"direction"`
-	ExecutedAt      time.Time      `json:"executed_at"`
-	DeltaQuantity   float64        `json:"delta_quantity"`
-	PositionBefore  float64        `json:"position_before"`
-	PositionAfter   float64        `json:"position_after"`
-	ExecutionVWAP   *float64       `json:"execution_vwap,omitempty"`
-	Multiplier      *float64       `json:"multiplier,omitempty"`
-	DirectCostsBase *float64       `json:"direct_costs_base,omitempty"`
-	Scores          []HorizonScore `json:"scores"`
+	ProtectionContext     ProtectionContext `json:"protection_context"`
+	ID                    string            `json:"id"`
+	ConID                 int64             `json:"-"`
+	Symbol                string            `json:"symbol"`
+	AssetClass            string            `json:"asset_class"`
+	Currency              string            `json:"currency,omitempty"`
+	Action                string            `json:"action"`
+	Direction             string            `json:"direction"`
+	ExecutedAt            time.Time         `json:"executed_at"`
+	DeltaQuantity         float64           `json:"delta_quantity"`
+	PositionBefore        float64           `json:"position_before"`
+	PositionAfter         float64           `json:"position_after"`
+	ExecutionVWAP         *float64          `json:"execution_vwap,omitempty"`
+	Multiplier            *float64          `json:"multiplier,omitempty"`
+	ExecutionNotionalBase *float64          `json:"execution_notional_base,omitempty"`
+	DirectCostsBase       *float64          `json:"direct_costs_base,omitempty"`
+	Scores                []HorizonScore    `json:"scores"`
 }
 
 // HorizonScore is one observed fixed-price-path comparison or its typed
@@ -252,6 +256,7 @@ type Finding struct {
 // point-in-time open-position snapshot. The two scopes deliberately have no
 // combined P/L field.
 type OptionReview struct {
+	Cycles   OptionCycles         `json:"cycles"`
 	Coverage OptionCoverage       `json:"coverage"`
 	Realized OptionRealizedReview `json:"realized"`
 	Open     OptionOpenReview     `json:"open"`
@@ -389,14 +394,14 @@ func defaultMethod() Method {
 		Metric:              "Decision price impact",
 		Counterfactual:      "Leave the exact-contract pre-trade position unchanged.",
 		HorizonDefinition:   "The 1st, 5th, and 20th available IBKR daily closes after the execution session; horizon FX is the latest broker conversion at or before that close, no more than seven calendar days old.",
-		HeadlineSelection:   "Among actions that clear the evidence and account-materiality gates, select the one with the most clean observations at the selected horizon; ties use open, add, trim, then exit. Strength or drag requires at least 3 observations, absolute total impact of at least 0.10% of starting equity, and an absolute median impact of at least 0.02% of starting equity.",
+		HeadlineSelection:   "Among action and direction groups that clear the evidence and account-materiality gates, select the one with the most clean observations at the selected horizon; ties use open, add, trim, then exit, with long before short. A described price outcome requires at least 3 observations, absolute total impact of at least 0.10% of starting equity, and an absolute median impact of at least 0.02% of starting equity.",
 		FindingRanking:      "After account-relative materiality gates, absolute Decision price impact as a percentage of disclosed execution notional, then absolute base-currency impact, then opaque change ID.",
 		MaterialityGate:     "A ranked finding requires decision notional of at least 0.25% of starting equity and absolute Decision price impact of at least 0.02% of starting equity.",
-		AutomaticHorizon:    "Choose the longest of 20, 5, and 1 sessions with at least 3 clean observations, one action represented at least 3 times, and at least 25% of eligible changes scored; otherwise show the best-covered horizon without labeling strength or drag.",
+		AutomaticHorizon:    "Choose the longest of 20, 5, and 1 sessions with at least 3 clean observations, one action represented at least 3 times, and at least 25% of eligible changes scored; otherwise show the best-covered horizon without a repeated-outcome headline.",
 		MarketContext:       "For SPY, QQQ, DIA, and VIX, compare the last daily close before the execution session with the close on the decision horizon day. QQQ and DIA are ETF proxies. Context is informational and never changes Decision price impact.",
 		AccountDefinition:   "Ending equity minus starting equity minus statement-confirmed external flows.",
 		Exclusions:          "Decision price impact excludes distributions, financing and borrow, market impact, and effects outside the fixed price-path comparison.",
-		OptionsMethod:       "Broker-reported realized option episodes and the latest dated open-position P/L snapshot are separate. Opening-only zero-P/L executions remain coverage, gains and losses are seated before magnitude ranking, missing evidence is never zero-filled, and no historical option counterfactual or cross-order strategy identity is synthesized.",
+		OptionsMethod:       "Proven exact-contract flat-to-flat positions opened and closed inside the window are a subset of broker-reported realized option episodes, separate from the latest dated open-position P/L snapshot. Opening-only zero-P/L executions remain coverage, gains and losses are seated before magnitude ranking, missing evidence is never zero-filled, and no historical option counterfactual or cross-order strategy identity is synthesized.",
 		NoCausalClaim:       true,
 		NoPredictiveClaim:   true,
 		NotInvestmentAdvice: true,

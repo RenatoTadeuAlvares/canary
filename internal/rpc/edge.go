@@ -82,6 +82,12 @@ type EdgeResult struct {
 	HorizonSessions      int                       `json:"horizon_sessions"`
 	AutomaticHorizon     bool                      `json:"automatic_horizon"`
 	HorizonSelection     EdgeHorizonSelection      `json:"horizon_selection"`
+	ProtectionState      string                    `json:"protection_state,omitempty"`
+	ProtectionAsOf       time.Time                 `json:"protection_as_of,omitzero"`
+	Patterns             []EdgeDecisionPattern     `json:"patterns"`
+	ReviewAction         string                    `json:"review_action,omitempty"`
+	ReviewDirection      string                    `json:"review_direction,omitempty"`
+	ReviewNote           string                    `json:"review_note,omitempty"`
 	Headline             string                    `json:"headline,omitempty"`
 	MarketContext        []EdgeMarketContextRollup `json:"market_context"`
 	MarketContextMissing []string                  `json:"market_context_missing"`
@@ -182,20 +188,22 @@ type EdgeFinding struct {
 
 // EdgeChangeDetail expands one opaque change without exposing broker identity.
 type EdgeChangeDetail struct {
-	ID              string             `json:"id"`
-	Symbol          string             `json:"symbol"`
-	AssetClass      string             `json:"asset_class"`
-	Currency        string             `json:"currency,omitempty"`
-	Action          string             `json:"action"`
-	Direction       string             `json:"direction"`
-	ExecutedAt      time.Time          `json:"executed_at"`
-	DeltaQuantity   float64            `json:"delta_quantity"`
-	PositionBefore  float64            `json:"position_before"`
-	PositionAfter   float64            `json:"position_after"`
-	ExecutionVWAP   *float64           `json:"execution_vwap,omitempty"`
-	Multiplier      *float64           `json:"multiplier,omitempty"`
-	DirectCostsBase *float64           `json:"direct_costs_base,omitempty"`
-	Scores          []EdgeHorizonScore `json:"scores"`
+	ProtectionContext     EdgeProtectionContext `json:"protection_context"`
+	ID                    string                `json:"id"`
+	Symbol                string                `json:"symbol"`
+	AssetClass            string                `json:"asset_class"`
+	Currency              string                `json:"currency,omitempty"`
+	Action                string                `json:"action"`
+	Direction             string                `json:"direction"`
+	ExecutedAt            time.Time             `json:"executed_at"`
+	DeltaQuantity         float64               `json:"delta_quantity"`
+	PositionBefore        float64               `json:"position_before"`
+	PositionAfter         float64               `json:"position_after"`
+	ExecutionVWAP         *float64              `json:"execution_vwap,omitempty"`
+	Multiplier            *float64              `json:"multiplier,omitempty"`
+	ExecutionNotionalBase *float64              `json:"execution_notional_base,omitempty"`
+	DirectCostsBase       *float64              `json:"direct_costs_base,omitempty"`
+	Scores                []EdgeHorizonScore    `json:"scores"`
 }
 
 // EdgeHorizonScore exposes either one calculated impact or a typed reason.
@@ -214,6 +222,7 @@ type EdgeHorizonScore struct {
 // EdgeOptionReview keeps realized option episodes and the dated open-position
 // snapshot as separate broker-truth scopes.
 type EdgeOptionReview struct {
+	Cycles   EdgeOptionCycles         `json:"cycles"`
 	Coverage EdgeOptionCoverage       `json:"coverage"`
 	Realized EdgeOptionRealizedReview `json:"realized"`
 	Open     EdgeOptionOpenReview     `json:"open"`
@@ -505,6 +514,9 @@ func ValidateEdgeResult(result EdgeResult) error {
 		if err := validateEdgeMarketContext(finding.MarketContext); err != nil {
 			return err
 		}
+	}
+	if err := validateEdgeLearning(result); err != nil {
+		return err
 	}
 	if err := validateEdgeOptionReview(result.Options); err != nil {
 		return err

@@ -849,19 +849,21 @@ func TestEdgeHeadlineUsesMostObservedActionAndExplainsEmptyEvidence(t *testing.T
 			{Action: edgecore.ActionAdd, Horizons: []rpc.EdgeHorizonRollup{{Sessions: 20, SampleCount: 3, TotalBase: &totalAdds, MedianBase: &medianAdds}}},
 		},
 	}
-	if got := edgeHeadline(result); !strings.Contains(got, "Observed drag: across 3 clean adds") || !strings.Contains(got, "totaled -300.00 USD") || !strings.Contains(got, "median -100.00 USD") {
+	result.Patterns = []rpc.EdgeDecisionPattern{{Action: "add", Direction: "long", EligibleChanges: 3, Horizons: []rpc.EdgePatternHorizon{{Sessions: 20, SampleCount: 3, TotalBase: &totalAdds, MedianBase: &medianAdds}}}}
+	if got := edgeHeadline(result); !strings.Contains(got, "Long adds: -300.00 USD price impact across 3 of 3 changes") || !strings.Contains(got, "-300.00 USD") || !strings.Contains(got, "median -100.00 USD") {
 		t.Fatalf("headline=%q", got)
 	}
 	totalAdds, medianAdds = 300, 100
-	if got := edgeHeadline(result); !strings.HasPrefix(got, "Observed strength:") {
+	if got := edgeHeadline(result); !strings.HasPrefix(got, "Long adds: +300.00 USD") {
 		t.Fatalf("positive pattern headline=%q", got)
 	}
 	medianAdds = -100
-	if got := edgeHeadline(result); !strings.HasPrefix(got, "Mixed observed pattern:") {
+	if got := edgeHeadline(result); !strings.HasPrefix(got, "Long adds: +300.00 USD") {
 		t.Fatalf("mixed pattern headline=%q", got)
 	}
 	result.Findings = nil
 	result.ActionRollups = nil
+	result.Patterns = nil
 	result.Coverage.MissingSections = []string{"trades"}
 	if got := edgeHeadline(result); !strings.Contains(got, "completed one-year broker report returned no Trades section") || !strings.Contains(got, "verify Trades at execution detail") || strings.Contains(got, "waiting") {
 		t.Fatalf("unproved headline=%q", got)
@@ -986,6 +988,7 @@ func TestPopulateEdgeResultNamesEveryUnavailableMarketBenchmark(t *testing.T) {
 	in := edgecore.Result{
 		Account:  &edgecore.AccountResult{StartingEquityBase: 100_000},
 		Coverage: edgecore.Coverage{EligibleChanges: 3, ScoredByHorizon: map[int]int{20: 3}},
+		Patterns: []edgecore.DecisionPattern{{Action: "add", Direction: "long", EligibleChanges: 3, Horizons: []edgecore.PatternHorizon{{Sessions: 20, SampleCount: 3, TotalBase: &total, MedianBase: &median}}}},
 		Rollups:  []edgecore.ActionRollup{{Action: edgecore.ActionAdd, Horizons: []edgecore.HorizonRollup{{Sessions: 20, SampleCount: 3, TotalBase: &total, MedianBase: &median}}}},
 	}
 	out := edgeStateOnlyResult(rpc.EdgeStateDegraded, "context_test", "365d", 20, true)
@@ -1025,5 +1028,16 @@ func TestEdgeSubsystemHealthProjectsSnapshotStateWithoutBrokerWork(t *testing.T)
 	srv.edgeBusy.Store(true)
 	if got := srv.edgeSubsystemHealth(); got.Status != "computing" {
 		t.Fatalf("refreshing Edge health = %+v", got)
+	}
+}
+
+func TestEdgeHeadlineDoesNotPoolOpposingDirections(t *testing.T) {
+	r := &rpc.EdgeResult{Account: &rpc.EdgeAccountResult{StartingEquityBase: 100000}, HorizonSessions: 20, HorizonSelection: rpc.EdgeHorizonSelection{Adequate: true, ScoredChanges: 4, EligibleChanges: 4, MinimumSample: 3}, Coverage: rpc.EdgeCoverage{TradeChanges: 4}}
+	for _, direction := range []string{"long", "short"} {
+		r.Patterns = append(r.Patterns, rpc.EdgeDecisionPattern{Action: "open", Direction: direction, EligibleChanges: 2, Horizons: []rpc.EdgePatternHorizon{{Sessions: 20, SampleCount: 2, TotalBase: new(float64(200)), MedianBase: new(float64(100))}}})
+	}
+	r.ActionRollups = []rpc.EdgeActionRollup{{Action: "open", Horizons: []rpc.EdgeHorizonRollup{{Sessions: 20, SampleCount: 4, TotalBase: new(float64(400)), MedianBase: new(float64(100))}}}}
+	if got := edgeHeadline(r); r.ReviewAction != "" || !strings.Contains(got, "No repeated") {
+		t.Fatalf("directions pooled: %s", got)
 	}
 }

@@ -54,21 +54,22 @@ type cashEvidence struct {
 }
 
 type groupedTrade struct {
-	key             string
-	account         string
-	conid           int64
-	symbol          string
-	assetClass      string
-	currency        string
-	side            string
-	executedAt      time.Time
-	delta           float64
-	vwap            *float64
-	multiplier      *float64
-	directCostsBase *float64
-	recordIDs       []string
-	queryComplete   bool
-	costFXMissing   bool
+	key                   string
+	account               string
+	conid                 int64
+	symbol                string
+	assetClass            string
+	currency              string
+	side                  string
+	executedAt            time.Time
+	delta                 float64
+	vwap                  *float64
+	multiplier            *float64
+	directCostsBase       *float64
+	executionNotionalBase *float64
+	recordIDs             []string
+	queryComplete         bool
+	costFXMissing         bool
 }
 
 type mutation struct {
@@ -120,6 +121,7 @@ func Analyze(input Input) (Result, error) {
 	unbalanced := unbalancedContracts(groups, index.mutationsByConID, ev)
 	windowStart := asOf.AddDate(0, 0, -input.WindowDays)
 	positions := initialPositions(groups, index.mutationsByConID, ev)
+	cycles := buildOptionCycles(ev, windowStart, asOf, input.BaseCurrency, input.ProtectionRecords, positions, unbalanced)
 	groupByKey := make(map[string]groupedTrade, len(groups))
 	for _, group := range groups {
 		groupByKey[group.key] = group
@@ -158,12 +160,14 @@ func Analyze(input Input) (Result, error) {
 		return result.Changes[i].ID < result.Changes[j].ID
 	})
 	result.Rollups = buildRollups(result.Changes)
+	result.Patterns = buildDecisionPatterns(result.Changes)
 	startingEquity := 0.0
 	if result.Account != nil {
 		startingEquity = result.Account.StartingEquityBase
 	}
 	result.Findings = buildFindings(result.Changes, startingEquity)
 	result.Options = buildOptionReview(ev, windowStart, asOf, input.BaseCurrency, ev.fxRates)
+	result.Options.Cycles = cycles
 	populateCoverage(&result.Coverage, result.Changes)
 	result.Fingerprint, err = fingerprint(result)
 	if err != nil {
@@ -428,11 +432,18 @@ func groupTrades(trades []flexstmt.Trade, baseCurrency string, fxRates []flexstm
 		sort.Slice(rows, func(i, j int) bool { return rows[i].RecordID < rows[j].RecordID })
 		first := rows[0]
 		g := groupedTrade{key: key, account: first.AccountID, conid: first.ConID, symbol: first.Symbol, assetClass: first.AssetClass, currency: first.Currency, side: strings.ToUpper(first.Side), executedAt: first.ExecutedAt, queryComplete: true}
-		var weighted, weight, costs float64
+		var weighted, weight, costs, executionNotional float64
+		notionalKnown := true
 		haveCost := true
 		var multiplier *float64
 		for _, row := range rows {
 			g.recordIDs = append(g.recordIDs, row.RecordID)
+			executionFX := baseConversionFX(row.Currency, baseCurrency, row.ExecutedAt, row.FXRateToBase, fxRates)
+			if row.Quantity == nil || row.Price == nil || row.Multiplier == nil || executionFX == nil || *row.Price <= 0 || *row.Multiplier <= 0 {
+				notionalKnown = false
+			} else {
+				executionNotional += math.Abs(*row.Quantity) * *row.Price * *row.Multiplier * *executionFX
+			}
 			if row.ExecutedAt.After(g.executedAt) {
 				g.executedAt = row.ExecutedAt
 			}
@@ -488,6 +499,9 @@ func groupTrades(trades []flexstmt.Trade, baseCurrency string, fxRates []flexstm
 		g.multiplier = multiplier
 		if haveCost {
 			g.directCostsBase = &costs
+		}
+		if notionalKnown {
+			g.executionNotionalBase = &executionNotional
 		}
 		out = append(out, g)
 	}
@@ -699,7 +713,12 @@ func buildChange(group groupedTrade, part changePart, before float64, input Inpu
 		cost = &value
 	}
 	change := Change{ConID: group.conid, Symbol: group.symbol, AssetClass: group.assetClass, Currency: group.currency, Action: part.action, Direction: part.direction, ExecutedAt: group.executedAt, DeltaQuantity: part.delta, PositionBefore: before, PositionAfter: before + part.delta, ExecutionVWAP: cloneFloat(group.vwap), Multiplier: cloneFloat(group.multiplier), DirectCostsBase: cost,
-		ID: opaqueID("change", group.key, part.action, part.direction, strconv.FormatFloat(part.delta, 'g', -1, 64))}
+		ID:                opaqueID("change", group.key, part.action, part.direction, strconv.FormatFloat(part.delta, 'g', -1, 64)),
+		ProtectionContext: changeProtectionContext(group.recordIDs, input.ProtectionRecords)}
+	if group.executionNotionalBase != nil {
+		value := *group.executionNotionalBase * ratio
+		change.ExecutionNotionalBase = &value
+	}
 	for _, sessions := range Horizons {
 		change.Scores = append(change.Scores, scoreHorizon(change, group, sessions, input, index, fxRates, pathReason))
 	}

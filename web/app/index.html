@@ -438,10 +438,11 @@
         <section class="edge-results" id="edgeResults" hidden>
           <article class="panel edge-impact" aria-labelledby="edgeImpactTitle">
             <div class="panel-head">
-              <span id="edgeImpactTitle">Your observed decision pattern</span>
+              <span id="edgeImpactTitle">What your covered decisions show</span>
               <span class="panel-time" id="edgeImpactLens">One year · 20-session headline</span>
             </div>
             <p class="edge-headline" id="edgeHeadline">--</p>
+            <div class="edge-learning" id="edgeLearning"></div>
             <div class="edge-market-context" id="edgeMarketContext" aria-label="Informational market context"></div>
             <div class="edge-matrix" id="edgeMatrix" role="table" aria-label="Decision price impact by action and horizon"></div>
           </article>
@@ -479,6 +480,7 @@
               <span class="panel-time" id="edgeOptionsCount">--</span>
             </div>
             <p class="edge-options__note">Realized episodes and the latest dated open snapshot stay separate. Gains and losses are seated before magnitude ranking. Tap a row for exact broker facts; Canary does not infer strategies, rolls, intent, or expired-option counterfactuals.</p>
+            <section id="edgeOptionCycles" class="edge-option-cycles" aria-label="Completed option positions"></section>
             <p class="edge-option-coverage" id="edgeOptionCoverage"></p>
             <div class="edge-option-scopes" id="edgeOptionList">
               <section class="edge-option-scope" aria-labelledby="edgeOptionRealizedTitle">
