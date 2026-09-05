@@ -4,12 +4,100 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
+
+type fundingRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f fundingRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestRegimeFundingTreasuryLatencyBudget(t *testing.T) {
+	// A real Treasury response needed 18.52s. Inspect effective deadlines in
+	// the transport instead of making a hermetic test wait for that latency.
+	// This catches either the old HTTP timeout or the old enclosing budget.
+	day := time.Now().UTC().Truncate(24 * time.Hour)
+	requests := make(chan time.Duration, 2)
+	orig := regimeTreasuryHTTPClient
+	client := *orig
+	client.Transport = fundingRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		deadline, ok := req.Context().Deadline()
+		if !ok || time.Until(deadline) < 20*time.Second {
+			return nil, errors.New("Treasury request budget cannot accommodate a 20-second response")
+		}
+		requests <- time.Until(deadline)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(treasuryFeedXML([]time.Time{day}))),
+			Header:     make(http.Header),
+		}, nil
+	})
+	regimeTreasuryHTTPClient = &client
+	t.Cleanup(func() { regimeTreasuryHTTPClient = orig })
+
+	deps := &regimeDeps{officialSeries: func(ctx context.Context, seriesID string) ([]regimeSeriesPoint, error) {
+		if seriesID == fredSeriesTBill3M {
+			return fetchOfficialRegimeSeries(ctx, seriesID)
+		}
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) > 12*time.Second {
+			return nil, errors.New("commercial-paper fetch lost its existing deadline")
+		}
+		return []regimeSeriesPoint{{Date: day, Value: 4.3}}, nil
+	}}
+	out := fetchRegimeFundingStress(context.Background(), deps)
+	if out.Status != "ok" || out.SpreadBps == nil {
+		t.Fatalf("funding should accept the bounded Treasury response: %s %s", out.Status, out.ErrorMessage)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("Treasury month requests = %d, want 2", len(requests))
+	}
+	for range 2 {
+		if budget := <-requests; budget > 25*time.Second {
+			t.Fatalf("Treasury HTTP deadline exceeds its 25-second bound: %s", budget)
+		}
+	}
+}
+
+func TestRegimeFundingParentDeadlineRemainsBinding(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	parentDeadline, _ := ctx.Deadline()
+	started := make(chan string, 2)
+	stopped := make(chan struct{}, 2)
+	deps := &regimeDeps{officialSeries: func(ctx context.Context, seriesID string) ([]regimeSeriesPoint, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok || !deadline.Equal(parentDeadline) {
+			t.Errorf("%s did not inherit the shorter parent deadline", seriesID)
+		}
+		started <- seriesID
+		<-ctx.Done()
+		stopped <- struct{}{}
+		return nil, ctx.Err()
+	}}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		out := fetchRegimeFundingStress(ctx, deps)
+		if out.Status != "error" || out.SpreadBps != nil {
+			t.Errorf("cancelled funding fetch returned a measurement: %s", out.Status)
+		}
+	}()
+	for range 2 {
+		<-started
+	}
+	cancel()
+	<-done
+	for range 2 {
+		<-stopped
+	}
+}
 
 func treasuryFeedXML(dates []time.Time) string {
 	var b strings.Builder
@@ -23,14 +111,36 @@ func treasuryFeedXML(dates []time.Time) string {
 	return b.String()
 }
 
+func TestTreasuryBillMonthsAcrossShorterMonths(t *testing.T) {
+	for _, tc := range []struct {
+		date string
+		want [2]string
+	}{
+		{"2026-03-31", [2]string{"202602", "202603"}},
+		{"2026-05-31", [2]string{"202604", "202605"}},
+		{"2026-08-31", [2]string{"202607", "202608"}},
+		{"2026-01-31", [2]string{"202512", "202601"}},
+	} {
+		t.Run(tc.date, func(t *testing.T) {
+			now, err := time.Parse("2006-01-02", tc.date)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := treasuryBillMonths(now); got != tc.want {
+				t.Fatalf("months = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // The bill leg's two-month merge is all-or-error: a month that fails to fetch
 // must fail the whole read, because a shorter merged series would be cached as
 // a complete fresh success and pin the derived spread to the older month for
 // the cache's full fresh window.
 func TestFetchTreasury13WeekBillAllOrError(t *testing.T) {
 	now := time.Now().UTC()
-	prevMonth := now.AddDate(0, -1, 0).Format("200601")
-	curMonth := now.Format("200601")
+	months := treasuryBillMonths(now)
+	prevMonth, curMonth := months[0], months[1]
 	prevStart, _ := time.Parse("200601", prevMonth)
 	curStart, _ := time.Parse("200601", curMonth)
 	prevDates := []time.Time{prevStart.AddDate(0, 0, 10), prevStart.AddDate(0, 0, 12)}

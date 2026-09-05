@@ -59,6 +59,13 @@ Additional corrections preserve the same measurement contract:
   maximum three-calendar-day Treasury lookback. Require current historical
   HYG/SPY baselines before confirmation. Require 252 observations for the SPY
   annual fallback.
+- Allow Treasury's two concurrent monthly XML requests 25 seconds each inside
+  a 30-second series budget. A live read returned valid current observations in
+  18.52 seconds, while the former 10-second HTTP/12-second caller budgets
+  rejected it. Other feeds and the 45-second overall refresh deadline retain
+  their existing bounds; publication freshness and funding bands are unchanged.
+  Select months from day one: subtracting a month from March 31 otherwise
+  normalizes into March again and silently drops the previous month's history.
 - Preserve served daemon bands/hysteresis in renderers and scheduled stale
   gamma context in Stress. Brief names SPX or a degraded SPY proxy and carries
   quality, feed, compute time and separate spot-observation time.
@@ -97,7 +104,8 @@ source-health fields, never private account data.
 Focused tests cover narrow expiry pockets, nearest genuine crossings, invalid
 smile fallback, class isolation, observed-IV anchoring, balanced exposure,
 bracketed skew and missing sources, local-sign depth, breadth history/catch-up,
-invalid batch retention, funding alignment, stale-baseline eligibility,
+invalid batch retention, funding alignment and bounded Treasury latency,
+stale-baseline eligibility,
 CLI/MCP parity, and source-preserving compact projections.
 
 The production SPA's synthetic mobile browser fixture exercises horizon

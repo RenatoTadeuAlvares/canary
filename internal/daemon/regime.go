@@ -1041,6 +1041,7 @@ const (
 )
 
 var regimeOfficialSeriesBudget = 12 * time.Second
+var regimeTreasurySeriesBudget = 30 * time.Second
 
 const creditSpreadsNotes = "Cash credit spreads from official ICE BofA OAS series via FRED/St. Louis Fed: high-yield OAS (BAMLH0A0HYM2) and investment-grade corporate OAS (BAMLC0A0CM). Units are percentage points. Default heuristic bands use HY OAS: <4.0 green, 4.0-5.5 yellow, >5.5 red; a 20-observation HY OAS widening of >0.50 pp is mixed and >1.00 pp is stressed. This complements HYG/SPY: HYG is faster intraday, OAS is the official cash-credit close. Confirmation gate: the red levels are already deep, so a fresh red confirms after 1 session."
 
@@ -1054,7 +1055,7 @@ func fetchRegimeCreditSpreads(ctx context.Context, deps *regimeDeps) rpc.RegimeC
 		out.ErrorMessage = "credit spreads: no official series fetcher configured"
 		return out
 	}
-	hyPoints, hyErr, igPoints, igErr := fetchRegimeSeriesPair(ctx, deps, fredSeriesHYOAS, fredSeriesIGOAS, regimeOfficialSeriesBudget)
+	hyPoints, hyErr, igPoints, igErr := fetchRegimeSeriesPair(ctx, deps, fredSeriesHYOAS, fredSeriesIGOAS, regimeOfficialSeriesBudget, regimeOfficialSeriesBudget)
 	if hyErr != nil || igErr != nil {
 		out.Status = rpc.RegimeStatusError
 		switch {
@@ -1114,21 +1115,21 @@ func fetchRegimeCreditSpreads(ctx context.Context, deps *regimeDeps) rpc.RegimeC
 	return out
 }
 
-func fetchRegimeSeriesPair(ctx context.Context, deps *regimeDeps, leftID, rightID string, budget time.Duration) ([]regimeSeriesPoint, error, []regimeSeriesPoint, error) {
+func fetchRegimeSeriesPair(ctx context.Context, deps *regimeDeps, leftID, rightID string, leftBudget, rightBudget time.Duration) ([]regimeSeriesPoint, error, []regimeSeriesPoint, error) {
 	type result struct {
 		id     string
 		points []regimeSeriesPoint
 		err    error
 	}
 	ch := make(chan result, 2)
-	fetchOne := func(seriesID string) {
+	fetchOne := func(seriesID string, budget time.Duration) {
 		cctx, cancel := context.WithTimeout(ctx, budget)
 		points, err := deps.officialSeries(cctx, seriesID)
 		cancel()
 		ch <- result{id: seriesID, points: points, err: err}
 	}
-	go fetchOne(leftID)
-	go fetchOne(rightID)
+	go fetchOne(leftID, leftBudget)
+	go fetchOne(rightID, rightBudget)
 
 	var leftPoints, rightPoints []regimeSeriesPoint
 	var leftErr, rightErr error
@@ -1170,7 +1171,7 @@ func fetchRegimeFundingStress(ctx context.Context, deps *regimeDeps) rpc.RegimeF
 		out.ErrorMessage = "funding stress: no official funding series fetcher configured"
 		return out
 	}
-	cpPoints, cpErr, tbPoints, tbErr := fetchRegimeSeriesPair(ctx, deps, fredSeriesCP3M, fredSeriesTBill3M, regimeOfficialSeriesBudget)
+	cpPoints, cpErr, tbPoints, tbErr := fetchRegimeSeriesPair(ctx, deps, fredSeriesCP3M, fredSeriesTBill3M, regimeOfficialSeriesBudget, regimeTreasurySeriesBudget)
 	if cpErr != nil || tbErr != nil {
 		out.Status = rpc.RegimeStatusError
 		switch {

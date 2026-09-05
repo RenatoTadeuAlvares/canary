@@ -23,6 +23,11 @@ type regimeSeriesPoint struct {
 
 var regimeHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
+// Treasury's monthly XML can take about 20 seconds to respond even when its
+// published data is current. Keep that bounded allowance specific to this feed;
+// the caller's deadline and the overall Regime refresh deadline still apply.
+var regimeTreasuryHTTPClient = &http.Client{Timeout: 25 * time.Second}
+
 func fetchFREDSeries(ctx context.Context, seriesID string) ([]regimeSeriesPoint, error) {
 	u := "https://fred.stlouisfed.org/graph/fredgraph.csv?id=" + url.QueryEscape(seriesID)
 	return fetchCSVSeries(ctx, u, seriesID, "2006-01-02")
@@ -136,7 +141,6 @@ func parseFedDDPSeriesCSV(r io.Reader, valueColumn string) ([]regimeSeriesPoint,
 }
 
 func fetchTreasury13WeekBill(ctx context.Context) ([]regimeSeriesPoint, error) {
-	now := time.Now().UTC()
 	// The previous AND current month merge into one series. The funding
 	// row's five-publication replay walks the sparse CP leg across month
 	// starts (CP prints carry ND gaps), and a current-month-only bill file
@@ -149,7 +153,7 @@ func fetchTreasury13WeekBill(ctx context.Context) ([]regimeSeriesPoint, error) {
 	// its full TTL; failing instead lets the cache serve its last complete
 	// entry. The months fetch concurrently so a slow response for one cannot
 	// starve the other inside the caller's shared budget.
-	months := []string{now.AddDate(0, -1, 0).Format("200601"), now.Format("200601")}
+	months := treasuryBillMonths(time.Now())
 	type monthResult struct {
 		points []regimeSeriesPoint
 		err    error
@@ -182,6 +186,14 @@ func fetchTreasury13WeekBill(ctx context.Context) ([]regimeSeriesPoint, error) {
 	return merged, nil
 }
 
+func treasuryBillMonths(now time.Time) [2]string {
+	now = now.UTC()
+	// Subtract from day one: March 31 minus one month normalizes to March 3,
+	// which otherwise fetches March twice and silently loses February.
+	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	return [2]string{start.AddDate(0, -1, 0).Format("200601"), start.Format("200601")}
+}
+
 func fetchTreasury13WeekBillMonth(ctx context.Context, month string) ([]regimeSeriesPoint, error) {
 	endpoint := treasuryBillRatesXMLURL(month)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -189,7 +201,7 @@ func fetchTreasury13WeekBillMonth(ctx context.Context, month string) ([]regimeSe
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "Go-http-client/1.1")
-	resp, err := regimeHTTPClient.Do(req)
+	resp, err := regimeTreasuryHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

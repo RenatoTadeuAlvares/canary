@@ -161,6 +161,15 @@ the latest T-bill observation on or before that date, at most three calendar
 days earlier. The five-publication change uses the same date join, so a newer
 Treasury print cannot silently shift only one endpoint.
 
+The previous and current Treasury months fetch concurrently and merge only
+when both succeed. Month selection starts from day one so short months cannot
+cause the same month to be fetched twice. Treasury gets a 25-second HTTP timeout
+within a 30-second series budget: valid monthly XML responses can take about
+20 seconds. CP and cash-credit series retain their 10-second HTTP and 12-second
+series budgets.
+Parent cancellation and the 45-second overall refresh deadline remain binding;
+the allowance changes neither publication freshness nor funding thresholds.
+
 ### FX carry
 
 USD/JPY stands in for global carry-trade pressure. It is quoted as yen per U.S.
