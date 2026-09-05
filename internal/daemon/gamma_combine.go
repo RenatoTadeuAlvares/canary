@@ -222,16 +222,7 @@ func perIndexRegime(c *rpc.GammaZeroComputed) string {
 	if c == nil {
 		return ""
 	}
-	if c.ZeroGamma != nil {
-		return strings.ReplaceAll(rpc.GammaRegimeFromGap(c.GapPct), "_", "-")
-	}
-	switch c.GammaSign {
-	case "positive":
-		return "long-gamma"
-	case "negative":
-		return "short-gamma"
-	}
-	return ""
+	return strings.ReplaceAll(rpc.GammaComputedRegime(c), "_", "-")
 }
 
 func dedupeStrings(in []string) []string {
@@ -406,6 +397,12 @@ func canonicalGammaWarningCode(raw string) (string, bool) {
 	}
 	if suffix, ok := strings.CutPrefix(code, "skew_fallback:"); ok && gammaDigits(suffix, 8) {
 		return code, true
+	}
+	if suffix, ok := strings.CutPrefix(code, "skew_fallback:"); ok {
+		class, date, scoped := strings.Cut(suffix, ":")
+		if scoped && (class == "spy" || class == "spx" || class == "spxw") && gammaDigits(date, 8) {
+			return code, true
+		}
 	}
 	for _, prefix := range []string{"refresh_failed:", "spy_unavailable:", "spx_unavailable:", "spx_cache_fallback:"} {
 		if suffix, ok := strings.CutPrefix(code, prefix); ok && canonicalGammaFailureToken(suffix) {

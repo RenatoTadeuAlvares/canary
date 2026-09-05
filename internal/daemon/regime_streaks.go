@@ -560,32 +560,6 @@ func classifyUSDJPYBand(weeklyChange *float64) string {
 	}
 }
 
-// classifyGammaBand maps a (gap_pct, sign) pair to its band per the
-// spec's §4 thresholds. Three paths matching the renderer's gamma-row
-// logic: a real crossing reads on gap distance; no-crossing reads on
-// the signed-profile sign.
-func classifyGammaBand(gapPct *float64, gammaSign string) string {
-	if gapPct != nil {
-		const yellowGap = 2.0 // ±2% of zero-gamma
-		switch {
-		case *gapPct > yellowGap:
-			return "green"
-		case *gapPct >= -yellowGap:
-			return "yellow"
-		default:
-			return "red"
-		}
-	}
-	// No crossing — band on the signed-profile direction.
-	switch gammaSign {
-	case "positive":
-		return "green" // dealer long-γ across sweep = stabilising regime
-	case "negative":
-		return "red" // dealer short-γ across sweep = amplifying regime
-	}
-	return ""
-}
-
 func classifyGammaComputedBand(c *rpc.GammaZeroComputed) string {
 	if !gammaComputedExplicitlyRankable(c) {
 		return ""
@@ -593,7 +567,15 @@ func classifyGammaComputedBand(c *rpc.GammaZeroComputed) string {
 	if c.Scope == rpc.GammaZeroScopeCombined && len(c.PerIndex) > 0 {
 		return combineGammaComputedBands(c)
 	}
-	return classifyGammaBand(c.GapPct, c.GammaSign)
+	switch rpc.GammaComputedRegime(c) {
+	case "long_gamma":
+		return "green"
+	case "transition_gamma":
+		return "yellow"
+	case "short_gamma":
+		return "red"
+	}
+	return ""
 }
 
 func gammaComputedExplicitlyRankable(c *rpc.GammaZeroComputed) bool {

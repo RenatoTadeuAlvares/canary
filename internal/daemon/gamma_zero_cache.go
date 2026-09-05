@@ -1227,6 +1227,15 @@ func cloneGammaComputed(c *rpc.GammaZeroComputed) *rpc.GammaZeroComputed {
 		return nil
 	}
 	out := *c
+	out.Insight = rpc.CloneGammaInsight(c.Insight)
+	out.ProfileMetrics = rpc.CloneGammaProfileMetrics(c.ProfileMetrics)
+	out.ProfileMetrics0DTE = rpc.CloneGammaProfileMetrics(c.ProfileMetrics0DTE)
+	out.ProfileMetrics1to7 = rpc.CloneGammaProfileMetrics(c.ProfileMetrics1to7)
+	out.ProfileMetricsTerm = rpc.CloneGammaProfileMetrics(c.ProfileMetricsTerm)
+	out.OptionSkews = append([]rpc.OptionSkew(nil), c.OptionSkews...)
+	for i, s := range c.OptionSkews {
+		out.OptionSkews[i] = *rpc.CloneGammaInsight(&rpc.GammaInsight{SelectedSkew: &s}).SelectedSkew
+	}
 	out.Warnings = append([]string(nil), c.Warnings...)
 	out.WarningDetails = append([]rpc.GammaWarningDetail(nil), c.WarningDetails...)
 	out.Expirations = append([]string(nil), c.Expirations...)
@@ -1368,56 +1377,31 @@ func remainingEta(g *gammaComputation, now time.Time, progress int32) int {
 //	and never negative (dealer book is long-gamma in every scenario
 //	and never positive (short-gamma regime).
 //	points, or every sample is exactly zero. The all-zero case usually
-func findZeroCrossing(profile []rpc.GammaProfilePoint) (zeroGamma *float64, sign string) {
+func findZeroCrossing(profile []rpc.GammaProfilePoint, reference ...float64) (zeroGamma *float64, sign string) {
 	if len(profile) < 2 {
 		return nil, "no_data"
 	}
-	allPositive := true
-	allNegative := true
-	nonZero := false
+	roots := gammaCrossings(profile)
+	if len(roots) > 0 {
+		spot := (profile[0].Spot + profile[len(profile)-1].Spot) / 2
+		if len(reference) > 0 {
+			spot = reference[0]
+		}
+		nearest := roots[0]
+		for _, r := range roots[1:] {
+			if math.Abs(r-spot) < math.Abs(nearest-spot) {
+				nearest = r
+			}
+		}
+		return &nearest, ""
+	}
 	for _, p := range profile {
-		if p.GEX < 0 {
-			allPositive = false
-			nonZero = true
-		}
 		if p.GEX > 0 {
-			allNegative = false
-			nonZero = true
+			return nil, "positive"
+		}
+		if p.GEX < 0 {
+			return nil, "negative"
 		}
 	}
-	if !nonZero {
-		return nil, "no_data"
-	}
-	if allPositive {
-		return nil, "positive"
-	}
-	if allNegative {
-		return nil, "negative"
-	}
-	// At this point at least one pair brackets the zero. Walk and
-	// interpolate on the FIRST bracketing pair — for dealer-gamma the
-	// sign function is monotone across the sweep range in practice
-	// (no multi-cross), but if it ever isn't, the renderer's profile
-	// chart will surface the anomaly and the user can investigate.
-	for i := 1; i < len(profile); i++ {
-		prev := profile[i-1]
-		curr := profile[i]
-		if (prev.GEX > 0 && curr.GEX < 0) || (prev.GEX < 0 && curr.GEX > 0) {
-			// Linear interpolation: solve GEX(x) = 0 for x on the line
-			x := prev.Spot - prev.GEX*(curr.Spot-prev.Spot)/(curr.GEX-prev.GEX)
-			return &x, ""
-		}
-		// Exact zero at a sample point — interpolate degenerates to
-		// the sample's own spot.
-		if prev.GEX == 0 {
-			x := prev.Spot
-			return &x, ""
-		}
-		if i == len(profile)-1 && curr.GEX == 0 {
-			x := curr.Spot
-			return &x, ""
-		}
-	}
-	// Shouldn't reach here given the allPositive/allNegative gates
 	return nil, "no_data"
 }

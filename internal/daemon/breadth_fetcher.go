@@ -72,12 +72,9 @@ func (f *breadthFetcher) FetchDaily(ctx context.Context, symbol string, lookback
 		if !b.Time.IsZero() {
 			date = b.Time.Format("2006-01-02")
 		}
-		// Skip bars with no parseable date — the engine's window
-		// merge relies on date strings as monotonic keys, and an
-		// empty date would silently collapse multiple bars into one
-		// same-day overwrite.
-		if date == "" {
-			continue
+		// Reject malformed dates instead of silently shortening the history.
+		if _, err := time.Parse("2006-01-02", date); err != nil {
+			return nil, fmt.Errorf("breadth fetcher: invalid daily bar date")
 		}
 		out = append(out, spx.Bar{Date: date, Close: b.Close})
 	}

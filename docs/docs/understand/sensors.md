@@ -64,11 +64,11 @@ observation could exist, not whether one arrived.
 
 ### What it answers
 
-Gamma estimates how the aggregate options-dealer book may respond as the
-underlying moves, and where gross gamma is concentrated. The signed profile
-looks for a zero crossing: below it the modeled book is generally amplifying
-moves, above it generally damping them. Read the result as a market-structure
-hint. It is not a precise trade level.
+Gamma models a conditional hedging response under an explicit OI sign
+assumption. Positive GEX at observed spot suggests damping, negative GEX
+suggests amplification, in either direction. Several crossings can exist, so
+above/below a level is insufficient to infer sign. It is market-structure
+context, not observed dealer inventory or a directional forecast.
 
 SPX/SPXW is the canonical S&P 500 signal; SPY is corroborating ETF context. The
 two use different scales, so the default `spy+spx` result keeps separate
@@ -91,10 +91,13 @@ Each per-index result reports:
 
 - zero-gamma status, zero-gamma price when a crossing exists, and spot's
   percentage gap from it;
-- the full signed profile and the swept spot range;
+- the signed profile, swept range and `profile_metrics` with exact spot GEX,
+  gross GEX, net-to-gross percentage and all detected crossings;
 - separate 0DTE, 1–7 DTE, and term profiles and crossings;
 - `gamma_total_abs`, the sign-agnostic gross gamma magnitude, and `top_strikes`,
-  the largest absolute concentrations;
+  the largest individual-contract absolute concentrations;
+- same-expiry 25-delta put-minus-call IV where both sides are bracketed,
+  and a daemon-authored interpretation with quality and provenance;
 - priced and contributing leg counts, OI/IV/skew coverage, warnings, and
   `quality.rankability`.
 
@@ -108,6 +111,12 @@ broader surface stays usable.
 Some Gamma quality bars, skew-fit quality among them, remain heuristic pending
 calibration from retained diagnostics. The result exposes the gate and its
 reason instead of presenting those bars as proven thresholds.
+
+The Brief and app Monitor preserve this explanation, including horizon
+availability and the distinction between option pricing and unknown bullish/
+bearish positioning. Old-method current state is invalidated by the v4 method
+token. Retained historical observations survive; a cold off-hours model waits
+for eligible market data rather than fabricating an updated read.
 
 ### Timing and last-good behavior
 

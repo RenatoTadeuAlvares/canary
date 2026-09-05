@@ -1729,6 +1729,10 @@ func cloneBriefResult(in *rpc.BriefResult) *rpc.BriefResult {
 	out.Ready.Gamma.Spot = cloneValue(in.Ready.Gamma.Spot)
 	out.Ready.Gamma.ZeroGamma = cloneValue(in.Ready.Gamma.ZeroGamma)
 	out.Ready.Gamma.GapPct = cloneValue(in.Ready.Gamma.GapPct)
+	out.Ready.Gamma.Insight = rpc.CloneGammaInsight(in.Ready.Gamma.Insight)
+	out.Ready.Gamma.Quality = rpc.CloneGammaSignalQuality(in.Ready.Gamma.Quality)
+	out.Ready.Gamma.ProfileMetrics = rpc.CloneGammaProfileMetrics(in.Ready.Gamma.ProfileMetrics)
+	out.Ready.Gamma.WarningDetails = append([]rpc.GammaWarningDetail(nil), in.Ready.Gamma.WarningDetails...)
 	out.Ready.MarketEvents = append([]rpc.BriefMarketEventRow(nil), in.Ready.MarketEvents...)
 	for i := range out.Ready.MarketEvents {
 		out.Ready.MarketEvents[i].Symbols = append([]string(nil), in.Ready.MarketEvents[i].Symbols...)
@@ -1844,5 +1848,9 @@ func cloneRegimeMonitor(in *rpc.RegimeMonitorResult) *rpc.RegimeMonitorResult {
 	out.DataQuality = append([]rpc.DataQualityHealth(nil), in.DataQuality...)
 	out.SourceHealth = append([]rpc.CompactSourceHealth(nil), in.SourceHealth...)
 	out.Indicators = append([]rpc.RegimeMonitorIndicator(nil), in.Indicators...)
+	out.GammaInsights = make([]*rpc.GammaInsight, len(in.GammaInsights))
+	for i, insight := range in.GammaInsights {
+		out.GammaInsights[i] = rpc.CloneGammaInsight(insight)
+	}
 	return &out
 }

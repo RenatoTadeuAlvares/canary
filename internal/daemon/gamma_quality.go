@@ -65,6 +65,7 @@ func refreshGammaSummaries(c *rpc.GammaZeroComputed) {
 	for _, sub := range c.PerIndex {
 		refreshGammaSummaries(sub)
 	}
+	c.Insight = buildGammaInsight(c)
 	c.Summary = buildGammaSummary(c)
 }
 

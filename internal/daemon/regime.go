@@ -942,21 +942,23 @@ func fetchRegimeHYGSPY(ctx context.Context, deps *regimeDeps) rpc.RegimeHYGSPYDi
 	} else {
 		// Frozen-mode fallback: in MarketDataType=2 the gateway sends
 		// tick 165 (Misc Stats) never arrives, no matter the budget.
-		// >365 to "1 Y" anyway, so 365 is the exact knee.
+		// Request 400 calendar days (broker duration 2 Y) to cover 252 observations.
 		hctx, hcancel := context.WithTimeout(ctx, 20*time.Second)
-		spyBars, err := deps.history(hctx, "SPY", 365)
+		spyBars, err := deps.history(hctx, "SPY", 400)
 		hcancel()
 		switch {
 		case err != nil:
 			warnDeps(deps, "regime: SPY 52w high history fetch failed: %v", err)
-		case len(spyBars) < 50:
-			// 50 is a soft floor — any shorter window doesn't
+		case len(spyBars) < 252:
 			warnDeps(deps, "regime: SPY 52w high insufficient bars: got %d, want ~252", len(spyBars))
 		default:
 			hi := maxHigh(spyBars, 252)
 			if hi > 0 {
 				out.SPY52WHigh = new(hi)
-				out.SPY52WHighQuality = derivedQuality(now, "SPY 252d max(High) fallback")
+				out.SPY52WHighQuality = derivedQuality(historyBarAsOf(spyBars[len(spyBars)-1], time.Time{}), "SPY 252-session max(High) fallback")
+				if !regimeHistoryCurrent(spyBars, now) {
+					out.FieldsMissing = append(out.FieldsMissing, "spy_history_stale")
+				}
 			}
 		}
 	}
@@ -1013,6 +1015,15 @@ func fetchRegimeHYGSPY(ctx context.Context, deps *regimeDeps) rpc.RegimeHYGSPYDi
 	out.Status = rpc.RegimeStatusOK
 	if hygSpotMissing || (out.HYGDataType != "close" && !rpc.IsLiveDataType(hygQ.dataType)) {
 		out.Status = rpc.RegimeStatusStale
+	}
+	if out.HYG50DMA != nil && !regimeHistoryCurrent(bars, now) {
+		out.Status = rpc.RegimeStatusStale
+		out.FieldsMissing = append(out.FieldsMissing, "hyg_history_stale")
+	}
+	for _, missing := range out.FieldsMissing {
+		if missing == "spy_history_stale" {
+			out.Status = rpc.RegimeStatusStale
+		}
 	}
 	// Advisory sub-field annotations — the row's primary measurements
 	if out.SPY52WHigh == nil {
@@ -1172,9 +1183,9 @@ func fetchRegimeFundingStress(ctx context.Context, deps *regimeDeps) rpc.RegimeF
 		}
 		return out
 	}
-	now := time.Now()
+	now := regimeNow(deps)
 	cp, cpOK := latestSeriesPoint(cpPoints)
-	tb, tbOK := latestSeriesPoint(tbPoints)
+	tb, tbOK := latestSeriesPointAtOrBefore(tbPoints, cp.Date, 3)
 	if !cpOK {
 		out.FieldsMissing = append(out.FieldsMissing, "cp_3m_rate")
 	}
@@ -1358,7 +1369,7 @@ func fetchRegimeGamma(ctx context.Context, s *Server) rpc.RegimeGammaZero {
 	return out
 }
 
-const breadthNotes = "S&P 500 breadth — the daemon computes two SMA readings and the new-52-week-highs/lows count locally from the 500 constituent daily closes (IBKR doesn't redistribute the underlying S&P DJI / NYSE breadth indices on retail subscriptions). Refresh runs once per US trading day after the equity-session close plus a 35-minute settle pad (normally 16:35 ET). Method token: constituent-fanout-50/200dma+nh-v2. The 50-day reading (`pct_above_50dma`) keeps the spec's bands: >55 green / 40-55 yellow / <40 with SPX within 3% of 52-week high is the textbook late-cycle divergence (red). The 200-day reading (`pct_above_200dma`) uses 60/40 bands calibrated to the post-Mag-7 era: >60 green / 40-60 yellow / <40 red (the StockCharts 70/30 default fires red far too often in this regime). New-highs/lows surface as a sub-signal: when SPX is near highs and `net_new_highs_pct` is near zero or negative, that's the classic narrow-rally pattern — a small set of mega-caps carrying the index while the median name is rolling over. Confirmation gate: a red confirms at <= 38% above-50DMA for 2 sessions (or <= 30% day one)."
+const breadthNotes = "S&P 500 constituent breadth, method constituent-fanout-50/200dma+nh-v3: 50- and 200-session SMA participation plus latest close versus the preceding 252 closes. Each measurement discloses its own coverage. Missing history is unavailable, not zero. Refresh follows the equity close plus a 35-minute settle pad. Existing 50-DMA bands are >55 green, 40–55 yellow, <40 red; confirmation requires <=38% for two sessions or <=30% on day one. Secondary breadth adds context without changing policy."
 
 func fetchRegimeBreadth(ctx context.Context, s *Server) rpc.RegimeBreadth {
 	out := rpc.RegimeBreadth{Notes: breadthNotes}
@@ -1584,9 +1595,9 @@ func classifyHorizonAgreement(c *rpc.GammaZeroComputed) string {
 		name   string
 		regime string
 	}{
-		{"0dte", rpc.GammaBucketRegime(c.SpotUnderlying, c.ZeroGamma0DTE, c.GammaSign0DTE)},
-		{"1to7", rpc.GammaBucketRegime(c.SpotUnderlying, c.ZeroGamma1to7, c.GammaSign1to7)},
-		{"term", rpc.GammaBucketRegime(c.SpotUnderlying, c.ZeroGammaTerm, c.GammaSignTerm)},
+		{"0dte", rpc.GammaMeasuredRegime(c.SpotUnderlying, c.ZeroGamma0DTE, c.GammaSign0DTE, c.ProfileMetrics0DTE)},
+		{"1to7", rpc.GammaMeasuredRegime(c.SpotUnderlying, c.ZeroGamma1to7, c.GammaSign1to7, c.ProfileMetrics1to7)},
+		{"term", rpc.GammaMeasuredRegime(c.SpotUnderlying, c.ZeroGammaTerm, c.GammaSignTerm, c.ProfileMetricsTerm)},
 	}
 	var usable []struct {
 		name   string
@@ -1620,5 +1631,5 @@ func classifyHorizonAgreement(c *rpc.GammaZeroComputed) string {
 	if !allSame {
 		return "diverge:partial"
 	}
-	return strings.TrimSuffix(first, "_gamma") + "_only"
+	return "agree:partial_" + strings.TrimSuffix(first, "_gamma")
 }

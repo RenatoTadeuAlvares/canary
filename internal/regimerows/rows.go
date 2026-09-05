@@ -559,13 +559,13 @@ func rowGammaCrossing(row Row, r rpc.RegimeGammaZero, c *rpc.GammaZeroComputed, 
 	if !gammaRankable {
 		return row
 	}
-	switch rpc.GammaRegimeFromGap(c.GapPct) {
+	switch rpc.GammaComputedRegime(c) {
 	case "long_gamma":
-		row.Band, row.Reason = BandGreen, fmt.Sprintf("spot >%.0f%% above γ-zero", rpc.GammaTransitionGapPct)
+		row.Band, row.Reason = BandGreen, fmt.Sprintf("positive modeled gamma; >%.0f%% from nearest crossing", rpc.GammaTransitionGapPct)
 	case "transition_gamma":
 		row.Band, row.Reason = BandYellow, fmt.Sprintf("spot within ±%.0f%% of γ-zero", rpc.GammaTransitionGapPct)
 	default:
-		row.Band, row.Reason = BandRed, "spot below γ-zero"
+		row.Band, row.Reason = BandRed, "negative modeled gamma; beyond transition distance"
 	}
 	return row
 }
@@ -579,22 +579,29 @@ func rowGammaSignedProfile(row Row, c *rpc.GammaZeroComputed, gammaRankable bool
 		mag = fmt.Sprintf("  |GEX| %.1fbn", c.GammaTotalAbs/1e9)
 	}
 	spotPrefix := fmt.Sprintf("spot %.2f · ", c.SpotUnderlying)
-	switch c.GammaSign {
-	case "positive":
+	switch rpc.GammaComputedRegime(c) {
+	case "long_gamma":
 		row.Value = fmt.Sprintf("%slong-γ%s", spotPrefix, mag)
 		if gammaRankable {
 			row.Band = BandGreen
-			row.Reason = "dealer long-γ · stabilizing"
+			row.Reason = "modeled long-γ · conditional damping"
 		} else {
 			row.Band = BandUnranked
 		}
-	case "negative":
+	case "short_gamma":
 		row.Value = fmt.Sprintf("%sshort-γ%s", spotPrefix, mag)
 		if gammaRankable {
 			row.Band = BandRed
-			row.Reason = "dealer short-γ · amplifying"
+			row.Reason = "modeled short-γ · conditional amplification"
 		} else {
 			row.Band = BandUnranked
+		}
+	case "transition_gamma":
+		row.Value = fmt.Sprintf("%sbalanced signed gamma%s", spotPrefix, mag)
+		row.Reason = "signed model balances at spot; gross option gamma remains"
+		row.Band = BandUnranked
+		if gammaRankable {
+			row.Band = BandYellow
 		}
 	default:
 		row.Value = fmt.Sprintf("spot %.2f", c.SpotUnderlying)
@@ -699,27 +706,16 @@ func rankableGammaCombinedRegimeBand(c *rpc.GammaZeroComputed) Band {
 }
 
 func gammaSingleRegimeBand(c *rpc.GammaZeroComputed) Band {
-	if c == nil {
+	if c == nil || (c.Quality != nil && c.Quality.Rankability != rpc.GammaRankabilityRankable) {
 		return BandUnranked
 	}
-	if c.Quality != nil && c.Quality.Rankability != rpc.GammaRankabilityRankable {
-		return BandUnranked
-	}
-	if c.GapPct != nil {
-		switch rpc.GammaRegimeFromGap(c.GapPct) {
-		case "long_gamma":
-			return BandGreen
-		case "transition_gamma":
-			return BandYellow
-		default:
-			return BandRed
-		}
-	}
-	switch c.GammaSign {
-	case "positive":
+	switch rpc.GammaComputedRegime(c) {
+	case "long_gamma":
 		return BandGreen
-	case "negative":
+	case "short_gamma":
 		return BandRed
+	case "transition_gamma":
+		return BandYellow
 	default:
 		return BandUnranked
 	}
@@ -783,15 +779,24 @@ func rowBreadth(now time.Time, r rpc.RegimeBreadth) Row {
 		return row
 	}
 	v50 := r.Envelope.PctAbove50DMA
-	v200 := r.Envelope.PctAbove200DMA
-	row.Value = fmt.Sprintf("%.0f%% above 50d · %.0f%% above 200d", v50, v200)
-	if r.NewHighsToday > 0 || r.NewLowsToday > 0 {
-		row.Value += fmt.Sprintf("  net highs %+.1f%%", r.NetNewHighsPct)
+	row.Value = fmt.Sprintf("%.0f%% above 50d", v50)
+	if v200 := r.Envelope.PctAbove200DMA; v200 != nil {
+		row.Value += fmt.Sprintf(" · %.0f%% above 200d", *v200)
+	} else {
+		row.Value += " · 200d unavailable"
+	}
+	if r.NetNewHighsPct != nil {
+		row.Value += fmt.Sprintf(" · net highs %+.1f%%", *r.NetNewHighsPct)
+	} else {
+		row.Value += " · 52-week coverage unavailable"
+	}
+	if r.Envelope.MemberCount > 0 {
+		row.Value += fmt.Sprintf(" · coverage 50d %d/%d, 200d %d/%d, 52w %d/%d", r.Envelope.Coverage50, r.Envelope.MemberCount, r.Envelope.Coverage200, r.Envelope.MemberCount, r.Envelope.CoverageHighsLows, r.Envelope.MemberCount)
 	}
 	row.Quality = qualityTag(now, r.ValueQuality)
 	// Renderer caveat: spec red band also requires "SPX within 3% of
 	switch {
-	case v50 >= breadthGreen:
+	case v50 > breadthGreen:
 		row.Band, row.Reason = BandGreen, "participation broad"
 	case v50 >= breadthRed:
 		row.Band, row.Reason = BandYellow, "participation narrowing"
@@ -989,78 +994,62 @@ func perIndexRegimeWord(c *rpc.GammaZeroComputed) string {
 	if c.ZeroGamma != nil {
 		return fmt.Sprintf("%s @ %s", gammaRegimeWord(c), formatSpotPrice(*c.ZeroGamma))
 	}
-	switch c.GammaSign {
-	case "positive":
-		return "long-γ"
-	case "negative":
-		return "short-γ"
-	}
-	return "—"
+	return gammaRegimeWord(c)
 }
 
 func gammaRegimeWord(c *rpc.GammaZeroComputed) string {
-	if c == nil {
+	switch rpc.GammaComputedRegime(c) {
+	case "long_gamma":
+		return "long-γ"
+	case "short_gamma":
+		return "short-γ"
+	case "transition_gamma":
+		return "transition"
+	default:
 		return "unavailable"
 	}
-	if c.GapPct != nil {
-		switch rpc.GammaRegimeFromGap(c.GapPct) {
-		case "long_gamma":
-			return "long-γ"
-		case "transition_gamma":
-			return "transition"
-		default:
-			return "short-γ"
-		}
-	}
-	switch c.GammaSign {
-	case "positive":
-		return "long-γ"
-	case "negative":
-		return "short-γ"
-	}
-	return "transition"
 }
 
 // gammaHeaderForScope returns the renderer's section header — varies
 
 // VIXTerm builds the VIX term-structure presentation row.
 func VIXTerm(now time.Time, row rpc.RegimeVIXTerm) Row {
-	return rowVIXTerm(now, row)
+	return servedIndicatorRow(rowVIXTerm(now, row), row.RegimeIndicatorMeta)
 }
 
 // VolOfVol builds the volatility-of-volatility presentation row.
 func VolOfVol(now time.Time, row rpc.RegimeVolOfVol) Row {
-	return rowVolOfVol(now, row)
+	return servedIndicatorRow(rowVolOfVol(now, row), row.RegimeIndicatorMeta)
 }
 
 // HYGSPY builds the credit-versus-equity divergence presentation row.
 func HYGSPY(now time.Time, row rpc.RegimeHYGSPYDivergence) Row {
-	return rowHYGSPY(now, row)
+	return servedIndicatorRow(rowHYGSPY(now, row), row.RegimeIndicatorMeta)
 }
 
 // CreditSpreads builds the official credit-spread presentation row.
 func CreditSpreads(now time.Time, row rpc.RegimeCreditSpreads) Row {
-	return rowCreditSpreads(now, row)
+	return servedIndicatorRow(rowCreditSpreads(now, row), row.RegimeIndicatorMeta)
 }
 
 // FundingStress builds the short-term funding-stress presentation row.
 func FundingStress(now time.Time, row rpc.RegimeFundingStress) Row {
-	return rowFundingStress(now, row)
+	return servedIndicatorRow(rowFundingStress(now, row), row.RegimeIndicatorMeta)
 }
 
 // USDJPY builds the dollar-yen carry-stress presentation row.
 func USDJPY(now time.Time, row rpc.RegimeUSDJPY) Row {
-	return rowUSDJPY(now, row)
+	return servedIndicatorRow(rowUSDJPY(now, row), row.RegimeIndicatorMeta)
 }
 
 // Gamma builds the dealer-gamma presentation row with provenance disclosure.
 func Gamma(now time.Time, row rpc.RegimeGammaZero) Row {
-	return rowGamma(now, row)
+	return servedIndicatorRow(rowGamma(now, row), row.RegimeIndicatorMeta)
 }
 
 // Breadth builds the S&P 500 breadth presentation row.
 func Breadth(now time.Time, row rpc.RegimeBreadth) Row {
-	return rowBreadth(now, row)
+	return servedIndicatorRow(rowBreadth(now, row), row.RegimeIndicatorMeta)
 }
 
 // GammaTripAnchor is the dealer-gamma trigger a gauge face prints beside its
@@ -1103,4 +1092,30 @@ func gammaLevelAnchor(c *rpc.GammaZeroComputed, index string) string {
 // IfNonEmpty returns value when non-empty and fallback otherwise.
 func IfNonEmpty(value, fallback string) string {
 	return ifNonEmpty(value, fallback)
+}
+
+// servedIndicatorRow preserves daemon banding, including hysteresis and
+// explicit unranked states. Raw fallback only supports legacy unannotated data.
+func servedIndicatorRow(out Row, meta rpc.RegimeIndicatorMeta) Row {
+	if out.Status != rpc.RegimeStatusOK {
+		out.Band = BandUnranked
+		return out
+	}
+	if meta.Thresholds == nil && meta.Band == "" {
+		return out
+	}
+	switch meta.Band {
+	case "green":
+		out.Band = BandGreen
+	case "yellow":
+		out.Band = BandYellow
+	case "red":
+		out.Band = BandRed
+	default:
+		out.Band = BandUnranked
+	}
+	if meta.BandReason != "" {
+		out.Reason = meta.BandReason
+	}
+	return out
 }

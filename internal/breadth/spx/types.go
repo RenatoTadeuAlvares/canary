@@ -17,7 +17,7 @@ import "time"
 // Method is the methodology token stamped on every snapshot so renderers
 // The token changes whenever the compute methodology or snapshot payload shape
 // becomes incompatible. LoadSnapshot treats a mismatch as a cold start rather
-const methodConstituentFanout = "constituent-fanout-50/200dma+nh-v2"
+const methodConstituentFanout = "constituent-fanout-50/200dma+nh-v3"
 
 // MethodConstituentFanout is the exported form of the current breadth
 // methodology token for daemon wire envelopes and documentation.
@@ -144,15 +144,19 @@ type WindowSet struct {
 
 // CurrentWindowSetVersion is the constituent-window schema version written by
 // the engine. Other versions are not projected into current state.
-const CurrentWindowSetVersion = 2
+const CurrentWindowSetVersion = 3
 
 // HistoryPoint is one session's breadth reading in rolling history. The
 type HistoryPoint struct {
-	Date           string  `json:"date"`
-	PctAbove50DMA  float64 `json:"pct_above_50dma"`
-	PctAbove200DMA float64 `json:"pct_above_200dma,omitempty"`
-	NewHighs       int     `json:"new_highs,omitempty"`
-	NewLows        int     `json:"new_lows,omitempty"`
+	Date              string   `json:"date"`
+	PctAbove50DMA     float64  `json:"pct_above_50dma"`
+	PctAbove200DMA    *float64 `json:"pct_above_200dma,omitempty"`
+	NewHighs          *int     `json:"new_highs"`
+	NewLows           *int     `json:"new_lows"`
+	MemberCount       int      `json:"member_count"`
+	Coverage50        int      `json:"coverage_50"`
+	Coverage200       int      `json:"coverage_200"`
+	CoverageHighsLows int      `json:"coverage_highs_lows"`
 }
 
 // HistorySet is the versioned rolling-history persistence shape. Points are
@@ -163,7 +167,7 @@ type HistorySet struct {
 }
 
 // CurrentHistorySetVersion is the history schema version written by the engine.
-const CurrentHistorySetVersion = 2
+const CurrentHistorySetVersion = 3
 
 // MaxHistoryPoints caps how many days of S5FI history the engine retains. The
 const MaxHistoryPoints = 60

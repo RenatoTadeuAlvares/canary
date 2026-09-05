@@ -89,7 +89,7 @@ func annotateRegimeMetadata(r *rpc.RegimeSnapshotResult, policies map[string]reg
 		Band:        band(StreakKeyHYGSPY, hygRaw),
 		BandReason:  reason(StreakKeyHYGSPY, hygRaw, hygSPYBandReason(r.HYGSPYDivergence)),
 		Thresholds:  rpc.RegimeThresholdsFor(rpc.RegimeIndicatorHYGSPY),
-		AsOf:        gatewayAsOf(now, r.HYGSPYDivergence.Status, r.HYGSPYDivergence.HYGDataType, "IBKR HYG/SPY quotes plus HMDS daily bars", r.HYGSPYDivergence.HYGQuality, r.HYGSPYDivergence.HYG50DMAQuality, r.HYGSPYDivergence.SPYQuality, r.HYGSPYDivergence.SPY52WHighQuality),
+		AsOf:        hygSPYRowAsOf(now, r.HYGSPYDivergence),
 		Eligibility: hygElig,
 		Freshness:   hygFresh,
 	}
@@ -301,18 +301,20 @@ func gammaBandReason(r rpc.RegimeGammaZero) string {
 	if c.ZeroGamma != nil && c.GapPct != nil {
 		switch bandForGamma(r) {
 		case "green":
-			return "spot >2% above gamma-zero"
+			return "positive modeled gamma; more than 2% from nearest crossing"
 		case "yellow":
 			return "spot within +/-2% of gamma-zero"
 		case "red":
-			return "spot >2% below gamma-zero"
+			return "negative modeled gamma; more than 2% from nearest crossing"
 		}
 	}
-	switch c.GammaSign {
-	case "positive":
-		return "dealer long-gamma; stabilizing"
-	case "negative":
-		return "dealer short-gamma; amplifying"
+	switch rpc.GammaComputedRegime(c) {
+	case "long_gamma":
+		return "modeled long-gamma; conditional damping"
+	case "short_gamma":
+		return "modeled short-gamma; conditional amplification"
+	case "transition_gamma":
+		return "signed gamma balances at spot; gross option gamma remains"
 	default:
 		return "sweep produced no signed profile"
 	}

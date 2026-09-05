@@ -166,7 +166,8 @@ wider industry uses a word differently, the entry says so.
   [Storage](../internals/storage.md).
 - **Unapproved:** a material human choice has not been made. It is not zero,
   safe, or a default. See [Trading policy](policy.md).
-- **Zero gamma:** the spot price at which the aggregate options-dealer book
-  switches from amplifying moves to damping them. It is a regime hint rather
-  than a precise level, and SPX is the canonical book with SPY as corroboration.
+- **Zero gamma:** a modeled signed-GEX crossing, in either direction, under
+  the stated option-positioning assumption. Several can exist; Canary displays
+  the nearest to spot. SPX is canonical, with SPY as corroboration. This is
+  conditional market structure, not observed dealer inventory or a precise level.
   See [Concepts](concepts.md#gamma).

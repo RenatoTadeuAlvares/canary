@@ -81,6 +81,7 @@ type RegimeMonitorResult struct {
 	DataQuality     []DataQualityHealth      `json:"data_quality,omitempty"`
 	SourceHealth    []CompactSourceHealth    `json:"source_health,omitempty"`
 	Indicators      []RegimeMonitorIndicator `json:"indicators"`
+	GammaInsights   []*GammaInsight          `json:"gamma_insights,omitempty"`
 }
 
 // CompactSourceHealth retains the status, reason, and freshness needed to
@@ -244,6 +245,7 @@ func CompactRegimeMonitor(r *RegimeSnapshotResult) RegimeMonitorResult {
 		WarningDetails:  r.WarningDetails,
 		DataQuality:     r.DataQuality,
 		SourceHealth:    compactSourceHealth(r.SourceHealth),
+		GammaInsights:   compactGammaInsights(r.GammaZero.Envelope.Result),
 		Indicators: []RegimeMonitorIndicator{
 			{Name: "VIX/VIX3M", Status: r.VIXTermStructure.Status, Cluster: RegimeIndicatorCluster(RegimeIndicatorVIXTerm), Band: r.VIXTermStructure.Band, AsOf: r.VIXTermStructure.AsOf, Reading: readingJoin(formatPtr("ratio", r.VIXTermStructure.Ratio), formatPtr("VIX", r.VIXTermStructure.VIX), formatPtr("VIX3M", r.VIXTermStructure.VIX3M)), Thresholds: r.VIXTermStructure.Thresholds, Eligibility: r.VIXTermStructure.Eligibility, FreshnessClass: freshnessClass(r.VIXTermStructure.Freshness)},
 			{Name: "VVIX", Status: r.VolOfVol.Status, Cluster: RegimeIndicatorCluster(RegimeIndicatorVolOfVol), Band: r.VolOfVol.Band, AsOf: regimeAsOf(r.VolOfVol.AsOf, r.VolOfVol.AsOfDate), Reading: readingJoin(formatPtr("last", r.VolOfVol.Last), formatPtr("5d%", r.VolOfVol.Change5D), formatPtr("20d", r.VolOfVol.Change20D), range52WReading(r.VolOfVol.Range52W)), Thresholds: r.VolOfVol.Thresholds, Eligibility: r.VolOfVol.Eligibility, FreshnessClass: freshnessClass(r.VolOfVol.Freshness)},
@@ -252,7 +254,7 @@ func CompactRegimeMonitor(r *RegimeSnapshotResult) RegimeMonitorResult {
 			{Name: "Funding", Status: r.FundingStress.Status, Cluster: RegimeIndicatorCluster(RegimeIndicatorFunding), Band: r.FundingStress.Band, AsOf: regimeAsOf(r.FundingStress.AsOf, r.FundingStress.AsOfDate), Reading: readingJoin(formatPtr("spread bp", r.FundingStress.SpreadBps), formatPtr("5obs bp", r.FundingStress.Change5Bps)), Thresholds: r.FundingStress.Thresholds, Eligibility: r.FundingStress.Eligibility, FreshnessClass: freshnessClass(r.FundingStress.Freshness)},
 			{Name: "USD/JPY", Status: r.USDJPY.Status, Cluster: RegimeIndicatorCluster(RegimeIndicatorUSDJPY), Band: r.USDJPY.Band, AsOf: r.USDJPY.AsOf, Reading: readingJoin(formatPtr("last", r.USDJPY.Last), formatPtr("week%", r.USDJPY.WeeklyChange), range52WReading(r.USDJPY.Range52W)), Thresholds: r.USDJPY.Thresholds, Eligibility: r.USDJPY.Eligibility, FreshnessClass: freshnessClass(r.USDJPY.Freshness)},
 			{Name: "Gamma", Status: r.GammaZero.Status, Cluster: RegimeIndicatorCluster(RegimeIndicatorGammaZero), Band: r.GammaZero.Band, AsOf: r.GammaZero.AsOf, Reading: gammaMonitorReading(r.GammaZero), Thresholds: r.GammaZero.Thresholds, Eligibility: r.GammaZero.Eligibility, FreshnessClass: freshnessClass(r.GammaZero.Freshness)},
-			{Name: "Breadth", Status: r.Breadth.Status, Cluster: RegimeIndicatorCluster(RegimeIndicatorBreadth), Band: r.Breadth.Band, AsOf: r.Breadth.AsOf, Reading: readingJoin(formatFloat("50dma%", r.Breadth.PctAbove50DMA), formatFloat("200dma%", r.Breadth.PctAbove200DMA), formatFloat("net highs%", r.Breadth.NetNewHighsPct)), Thresholds: r.Breadth.Thresholds, Eligibility: r.Breadth.Eligibility, FreshnessClass: freshnessClass(r.Breadth.Freshness)},
+			{Name: "Breadth", Status: r.Breadth.Status, Cluster: RegimeIndicatorCluster(RegimeIndicatorBreadth), Band: r.Breadth.Band, AsOf: r.Breadth.AsOf, Reading: readingJoin(formatFloat("50dma%", r.Breadth.PctAbove50DMA), formatPtr("200dma%", r.Breadth.PctAbove200DMA), formatPtr("net highs%", r.Breadth.NetNewHighsPct), fmt.Sprintf("coverage 50d %d/%d; 200d %d/%d; 52w %d/%d", r.Breadth.Envelope.Coverage50, r.Breadth.Envelope.MemberCount, r.Breadth.Envelope.Coverage200, r.Breadth.Envelope.MemberCount, r.Breadth.Envelope.CoverageHighsLows, r.Breadth.Envelope.MemberCount)), Thresholds: r.Breadth.Thresholds, Eligibility: r.Breadth.Eligibility, FreshnessClass: freshnessClass(r.Breadth.Freshness)},
 		},
 	}
 }

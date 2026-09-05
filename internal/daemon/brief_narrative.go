@@ -674,15 +674,25 @@ func briefReadyTape(p *briefProse, ready rpc.BriefReadySection) {
 	switch {
 	case breadth.Status == rpc.BriefStatusUnavailable:
 		p.text("Breadth is unavailable, so participation cannot be stated.")
-	case breadth.PctAbove50DMA == nil || breadth.PctAbove200DMA == nil || breadth.NetNewHighsPct == nil:
+	case breadth.PctAbove50DMA == nil:
 		p.text("Breadth is degraded, so participation cannot be stated.")
 	default:
 		p.text("Breadth has ")
 		p.figure(briefPercent(*breadth.PctAbove50DMA, false))
-		p.text(" above the 50-DMA and ")
-		p.figure(briefPercent(*breadth.PctAbove200DMA, false))
-		p.text(" above the 200-DMA, net new highs ")
-		p.figure(briefPercent(*breadth.NetNewHighsPct, true))
+		p.text(" above the 50-DMA")
+		if breadth.PctAbove200DMA != nil {
+			p.text(" and ")
+			p.figure(briefPercent(*breadth.PctAbove200DMA, false))
+			p.text(" above the 200-DMA")
+		} else {
+			p.text("; 200-DMA coverage is unavailable")
+		}
+		if breadth.NetNewHighsPct != nil {
+			p.text(", net new highs ")
+			p.figure(briefPercent(*breadth.NetNewHighsPct, true))
+		} else {
+			p.text("; 52-week coverage is unavailable")
+		}
 		p.text(".")
 	}
 
@@ -691,18 +701,28 @@ func briefReadyTape(p *briefProse, ready rpc.BriefReadySection) {
 	switch {
 	case gamma.Status == rpc.BriefStatusUnavailable:
 		p.text("Dealer gamma is unavailable.")
-	case gamma.Spot == nil || gamma.ZeroGamma == nil:
+	case gamma.Spot == nil || gamma.Regime == "":
 		p.text("Dealer gamma is degraded, so the spot-to-zero-gamma relationship cannot be stated.")
 	default:
-		p.text("Dealer gamma is " + briefGammaSignWords(gamma.GammaSign) + " with spot ")
+		p.text(gamma.Underlying + " modeled gamma is " + strings.ReplaceAll(gamma.Regime, "_", " ") + " with spot ")
 		p.figure(briefPrice(*gamma.Spot))
-		p.text(" against zero gamma ")
-		p.figure(briefPrice(*gamma.ZeroGamma))
+		if gamma.ZeroGamma != nil {
+			p.text(" against nearest zero gamma ")
+			p.figure(briefPrice(*gamma.ZeroGamma))
+		} else {
+			p.text("; no sign crossing was detected in the sampled range")
+		}
 		if gamma.GapPct != nil {
 			p.text(", a gap of ")
 			p.figure(briefPercent(*gamma.GapPct, true))
 		}
 		p.text(".")
+		if gamma.Status != rpc.BriefStatusOK {
+			p.text(" Context only: " + gamma.Detail + ".")
+		}
+		if gamma.Insight != nil {
+			p.text(" " + gamma.Insight.Interpretation + " " + gamma.Insight.HorizonInterpretation + " " + gamma.Insight.SkewInterpretation + " " + gamma.Insight.Provenance)
+		}
 	}
 
 	p.sentence()
@@ -1025,15 +1045,6 @@ func briefRegimeReading(regime rpc.BriefRegimeRow) string {
 	default:
 		return "market conditions: " + verdict
 	}
-}
-
-// briefGammaSignWords keeps the served sign word when there is one and says so
-// plainly when there is not.
-func briefGammaSignWords(sign string) string {
-	if strings.TrimSpace(sign) == "" {
-		return "unclassified"
-	}
-	return sign
 }
 
 func briefEventKindLabel(kind string) string {

@@ -3560,10 +3560,15 @@ func (s *Server) buildBreadthSPX(req *rpc.Request, allowRefresh bool) (*rpc.Brea
 
 	if ok {
 		res.PctAbove50DMA = snap.PctAbove50DMA
-		res.PctAbove200DMA = snap.PctAbove200DMA
-		res.NewHighsToday = snap.NewHighsToday
-		res.NewLowsToday = snap.NewLowsToday
-		res.NetNewHighsPct = snap.NetNewHighsPct
+		res.MemberCount, res.Coverage50 = snap.MemberCount, snap.Coverage
+		res.Coverage200, res.CoverageHighsLows = snap.Coverage200, snap.CoverageHighsLows
+		if snap.Coverage200 > 0 {
+			res.PctAbove200DMA = new(snap.PctAbove200DMA)
+		}
+		if snap.CoverageHighsLows > 0 {
+			res.NewHighsToday, res.NewLowsToday = new(snap.NewHighsToday), new(snap.NewLowsToday)
+			res.NetNewHighsPct = new(snap.NetNewHighsPct)
+		}
 		res.AsOf = snap.AsOf
 		res.SessionKey = snap.SessionKey
 		res.Stale = breadthEnvelopeStale(res, time.Now())
@@ -3572,11 +3577,15 @@ func (s *Server) buildBreadthSPX(req *rpc.Request, allowRefresh bool) (*rpc.Brea
 		res.History = make([]rpc.BreadthDailyValue, 0, len(history))
 		for _, h := range history {
 			res.History = append(res.History, rpc.BreadthDailyValue{
-				Date:           h.Date,
-				PctAbove50DMA:  h.PctAbove50DMA,
-				PctAbove200DMA: h.PctAbove200DMA,
-				NewHighs:       h.NewHighs,
-				NewLows:        h.NewLows,
+				Date:              h.Date,
+				PctAbove50DMA:     h.PctAbove50DMA,
+				PctAbove200DMA:    h.PctAbove200DMA,
+				NewHighs:          h.NewHighs,
+				NewLows:           h.NewLows,
+				MemberCount:       h.MemberCount,
+				Coverage50:        h.Coverage50,
+				Coverage200:       h.Coverage200,
+				CoverageHighsLows: h.CoverageHighsLows,
 			})
 		}
 	}

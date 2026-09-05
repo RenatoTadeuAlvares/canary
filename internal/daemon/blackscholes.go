@@ -12,7 +12,7 @@ import "math"
 // strike, vol, t) tuple and let the caller assign the sign per the
 // dealer-positioning convention.
 //
-// Formula: γ = φ(d1) / (S · σ · √t)
+// Formula: γ = exp(−q·t) · φ(d1) / (S · σ · √t)
 //
 // where d1 = ( ln(S/K) + (r − q + σ²/2) · t ) / ( σ · √t )
 // and φ is the standard normal probability density.
@@ -35,7 +35,7 @@ func bsGamma(spot, strike, t, vol, r, q float64) float64 {
 	d1 := (math.Log(spot/strike) + (r-q+0.5*vol*vol)*t) / (vol * sqrtT)
 	// Standard-normal pdf: φ(x) = exp(-x²/2) / √(2π).
 	pdf := math.Exp(-0.5*d1*d1) / math.Sqrt(2*math.Pi)
-	return pdf / (spot * vol * sqrtT)
+	return math.Exp(-q*t) * pdf / (spot * vol * sqrtT)
 }
 
 // dealerGEX returns the dollar gamma per 1 % move attributable to a

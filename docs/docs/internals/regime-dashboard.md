@@ -1,6 +1,6 @@
 # Regime dashboard contract
 
-Updated: 2026-08-09
+Updated: 2026-09-05
 
 The daemon's Regime engine classifies the broad-market stress lifecycle as `quiet`,
 `early_warning`, `confirmed_stress`, `panic`, `stabilization`, `opportunity`,
@@ -25,6 +25,13 @@ Each row carries:
 - source and as-of;
 - a short band reason;
 - the threshold set used.
+
+The compact app monitor also carries `gamma_insights[]`, preserving each
+underlying's explanation and quality. The daily Brief exposes canonical SPX
+under `ready.gamma` (or a degraded, explicitly named SPY proxy). CLI and
+`canary_brief` MCP render this daemon-authored contract; app snapshot/bootstrap
+and SSE retain the same evidence. A retained app authority labels these as
+last-known observations rather than promoting their historical rankability.
 
 The top-level envelope also carries:
 
@@ -122,6 +129,11 @@ either way; it just does not get to call broad stress alone.
 | HYG/SPY | HYG healthy | HYG below 50-DMA | HYG weak while SPY is near highs |
 | HY OAS | < 4.0 and not widening | 4.0-5.5 or widening > 0.50 pp | > 5.5 or widening > 1.00 pp |
 
+The HYG 50-DMA and SPY historical annual-high fallback must reach the last
+completed equity session. A live quote cannot freshen an outdated historical
+baseline. Missing/stale history is disclosed before confirmation eligibility;
+the SPY annual fallback requires at least 252 observations.
+
 ### Funding
 
 Funding tracks stress in short-term money markets. Commercial paper is
@@ -143,6 +155,11 @@ lead for the 2020-2024 stress events — funding confirms late by nature — so
 the quieter definition costs no warning. Red at 75 bp is unchanged (ten days
 in eleven years, eight of them March 2020), and a missing five-publication
 change holds yellow at level rather than softening the warning.
+
+The current funding spread pairs the latest commercial-paper publication with
+the latest T-bill observation on or before that date, at most three calendar
+days earlier. The five-publication change uses the same date join, so a newer
+Treasury print cannot silently shift only one endpoint.
 
 ### FX carry
 
@@ -167,10 +184,11 @@ confirm-at-next-open guidance.
 
 ### Dealer gamma
 
-This row asks whether dealer hedging is more likely to dampen or amplify index
-moves. Above zero-gamma, hedging flows are usually more stabilizing.
-Below zero-gamma, hedging can chase the market lower or higher and make moves
-sharper. Treat this as a regime hint, not a precise tradable level.
+This row models whether hedging would dampen or amplify index moves under the
+calls-positive/puts-negative OI assumption. The sign is measured at actual spot;
+above/below a crossing is only a geometric distance and can imply the wrong
+sign on a non-monotone profile. Treat this as conditional market structure,
+not a directional forecast or observed dealer inventory.
 
 SPX/SPXW index options are the canonical production signal for S&P 500 dealer
 gamma. SPY's option book trades separately and is used as corroborating context
@@ -180,7 +198,16 @@ canonical S&P dealer-gamma row.
 
 | Row | Green | Yellow | Red |
 | --- | --- | --- | --- |
-| SPX zero-gamma | spot > 2% above zero-gamma | within +/-2% | spot > 2% below zero-gamma |
+| SPX zero-gamma | positive modeled GEX beyond transition distance | within +/-2% of nearest crossing, or balanced signed GEX | negative modeled GEX beyond transition distance |
+
+The v4 profile includes exact spot and narrow expiry kernels, refines sign
+changes, and reports all detected crossings, selecting the nearest. Same-date
+SPX and SPXW fits stay separate. Per-index `insight` carries the 0DTE, 1–7 DTE
+and term readings, partial coverage, feed, observation time and rankability.
+`option_skews` compares bracketed same-expiry 25-delta put and call IV;
+`insight.selected_skew` selects a covered 7–60 day expiry nearest 30 days.
+Positive values mean richer downside pricing, not bearish positioning. The
+[Gamma concepts](../understand/concepts.md#gamma) document assumptions and sources.
 
 Gamma is ranked only when `gamma_zero.envelope.result.quality.rankability` is
 `rankable`. Non-rankable gamma remains visible in the row/envelope, but it does
@@ -214,11 +241,11 @@ in `quality.coverage` as diagnostics, and the SPX slice's own verdict reaches
 the combined node through the `spx_coverage` gate. One consequence: a SPY slice
 ranking inside the disclosed skew window votes in the combined band weighting.
 
-Every successful compute appends an immutable typed gamma-skew observation to
-`$XDG_STATE_HOME/ibkr/daemon.db`: per-expiry R² and residual RMS, coverage,
-rankability. These retained observations are offline calibration input for the
-heuristic bars. Live decisions do not read the corpus, and it is not a
-delete-safe cache.
+Successful computes retain immutable typed gamma payload observations in
+`$XDG_STATE_HOME/ibkr/daemon.db`, including fit and coverage measurements.
+Serving annotates current rankability afterward. The separate ranked skew
+calibration stream is inactive under production storage; a populated, ranked
+calibration corpus is not established. Existing quality bars remain heuristic.
 
 ### Breadth
 
@@ -234,6 +261,12 @@ trigger a 500-name fanout.
 | Row | Green | Yellow | Red |
 | --- | --- | --- | --- |
 | S&P 500 breadth | > 55% above 50-DMA | 40-55%, or weakening near highs | < 40%, especially while SPX is near highs |
+
+Breadth v3 retains the latest plus 252 preceding closes and fetches enough
+calendar history to populate them. `coverage_50`, `coverage_200` and
+`coverage_highs_lows` disclose separate denominators against `member_count`,
+including in history. Uncovered secondary values are null/absent; measured
+zero remains zero. The existing 80% 50-DMA publication requirement is unchanged.
 
 ## How inputs report currency
 
@@ -290,7 +323,7 @@ old, thin pre-open tick) and a prior-evening gamma cache mutually confirmed
 (internal-docs/design/regime-calibration.md).
 
 Gates per indicator (heuristic noise floors, pending_backtest like the band
-thresholds; values live in `internal/rpc/regime_policy.go`):
+thresholds; values live in `internal/rpc/history_index.go`):
 
 | Indicator | Min depth for eligible red | Fast path (eligible day 1) | Min streak (NY trading sessions) | Cadence freshness | Exit hysteresis (leave red) |
 | --- | --- | --- | --- | --- | --- |
@@ -300,13 +333,15 @@ thresholds; values live in `internal/rpc/regime_policy.go`):
 | HY OAS | band is the gate | n/a | 1 | series <= 7d | < 5.25 and widening < 0.85 pp |
 | Funding | band is the gate | n/a | 1 | series <= 7d | < 65 bp |
 | USD/JPY | band is the gate (speed is depth) | n/a | 1 | live tick while IDEALPRO trades (Sunday 17:15 to Friday 17:00 ET); the weekend and the daily 17:00-17:15 ET changeover are `not_due`, not overdue | yen move < 1.5% |
-| Dealer gamma | gamma-weighted SPY/SPX depth >= 0.5% below gamma-zero | depth >= 4.5% below, or a wholly-short profile | 1 | compute within current NY trading date (prior-date cache = `stale`, warns only) | weighted gap > +0.5% |
+| Dealer gamma | gamma-weighted SPY/SPX signed model depth >= 0.5% | short-gamma depth >= 4.5%, or a wholly-short profile | 1 | compute within current NY trading date (prior-date cache = `stale`, warns only) | signed depth < -0.5% |
 | Breadth | <= 38% | <= 30% | 2 | last completed session's compute | > 45% |
 
 Dealer gamma's depth averages the two indexes by each one's gross gamma
 exposure — the same weighting the combined row's band vote uses, so the index
 that decides the band is the index that decides whether the red is deep enough
-to count. What is averaged is each index's depth, not its gap: an index whose
+to count. Crossing distance takes its sign from local GEX: negative modeled
+GEX gives positive stress depth, and positive GEX gives negative depth.
+What is averaged is each index's depth, not its geometric gap: an index whose
 dealers are short gamma across the whole modelled range has no crossing, and so
 no gap, but that is the most amplifying reading gamma has and it enters the
 average at its full weight. An index with no crossing on the long side has no

@@ -25,9 +25,8 @@ type Bar struct {
 //
 // Contract:
 //   - FetchDaily returns bars in chronological order, oldest first.
-//   - lookbackDays is a soft hint: the fetcher may return more or
-//     fewer than the requested count (holidays, half-days, listing
-//     date). Callers slice the result themselves.
+//   - lookbackDays is a calendar-day duration, not a bar count.
+//     Weekends, holidays and listing dates reduce the returned bars.
 //   - Errors per-symbol are non-fatal to the engine: a refresh that
 //     loses some names still returns a partial result rather than
 //     failing the whole call.
@@ -89,14 +88,17 @@ func (f *FakeBarFetcher) FetchDaily(ctx context.Context, symbol string, lookback
 	if bars == nil {
 		return nil, fmt.Errorf("fake: no canned bars for %s", symbol)
 	}
-	// Trim from the tail (most recent), matching what a real
-	// historical-bar source does when you ask for N trailing days.
-	if lookbackDays > 0 && len(bars) > lookbackDays {
-		bars = bars[len(bars)-lookbackDays:]
+	// Trim by calendar duration relative to the latest canned observation.
+	if lookbackDays > 0 && len(bars) > 0 {
+		if latest, err := time.Parse("2006-01-02", bars[len(bars)-1].Date); err == nil {
+			cutoff := latest.AddDate(0, 0, -lookbackDays).Format("2006-01-02")
+			for len(bars) > 0 && bars[0].Date < cutoff {
+				bars = bars[1:]
+			}
+		}
 	}
-	out := make([]Bar, len(bars))
-	copy(out, bars)
-	return out, nil
+
+	return append([]Bar(nil), bars...), nil
 }
 
 // CallCount returns the number of recorded fetch attempts. Convenience

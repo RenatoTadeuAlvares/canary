@@ -109,8 +109,7 @@ func Compute(members []string, windows map[string]ConstituentWindow, sessionKey 
 // SlideWindow folds today's close into a constituent window. It does
 // three things in one pass:
 //
-//  1. Append today's close to the chronological Closes slice and trim
-//     to the v2 cap of WindowSize200 entries.
+//  1. Retain today's close plus the preceding RollingMaxBars closes.
 //  2. Update the rolling max/min over the previous RollingMaxBars
 //     closes (excluding today's), so the next Compute can detect
 //     "today made a new 252-bar high".
@@ -139,33 +138,22 @@ func SlideWindow(w ConstituentWindow, close float64, barDate string) Constituent
 		// Same trading day appearing twice — overwrite the tail to
 		// reflect the corrected close. Don't grow the window. Rolling
 		// max/min stays as-is: a late-print correction to today's
-		// close shouldn't kick a new-high vs the prior-251-day max
+		// close compares against the same prior-252-session max
 		// that's already locked in.
 		out.Closes[len(out.Closes)-1] = close
 		return out
 	}
 	// Roll the prior close (if any) into the rolling max/min. The
 	if len(out.Closes) > 0 {
-		prevClose := out.Closes[len(out.Closes)-1]
-		out.HighRollingBarsHad = min(out.HighRollingBarsHad+1, RollingMaxBars)
-		out.LowRollingBarsHad = out.HighRollingBarsHad
-		if out.HighRollingMax == 0 || prevClose > out.HighRollingMax {
-			out.HighRollingMax = prevClose
-		}
-		if out.LowRollingMin == 0 || prevClose < out.LowRollingMin {
-			out.LowRollingMin = prevClose
-		}
-		// Once we've seen RollingMaxBars bars, the simple "max-so-far"
-		// exactly on every slide; instead, after we've seen the full
-		if out.HighRollingBarsHad == RollingMaxBars && len(out.Closes) >= WindowSize200 {
-			out.HighRollingMax = sliceMax(out.Closes)
-			out.LowRollingMin = sliceMin(out.Closes)
-		}
+		prior := out.Closes[max(0, len(out.Closes)-RollingMaxBars):]
+		out.HighRollingMax = sliceMax(prior)
+		out.LowRollingMin = sliceMin(prior)
+		out.HighRollingBarsHad = len(prior)
+		out.LowRollingBarsHad = len(prior)
 	}
 	out.Closes = append(out.Closes, close)
-	if len(out.Closes) > WindowSize200 {
-		// Drop oldest. Keep at most WindowSize200 entries — older
-		out.Closes = out.Closes[len(out.Closes)-WindowSize200:]
+	if len(out.Closes) > RollingMaxBars+1 {
+		out.Closes = out.Closes[len(out.Closes)-(RollingMaxBars+1):]
 	}
 	return out
 }

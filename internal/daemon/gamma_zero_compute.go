@@ -45,7 +45,7 @@ const (
 	nearDTECutoffYears = 7.0 / 365.0 // upper bound on the 1-7 bucket; >7 falls in term
 
 	// sweepPoints is the number of (spot, GEX) samples in the profile.
-	sweepPoints = 60
+	sweepPoints = 601
 
 	// topStrikesK is the number of concentration rows on the result —
 	topStrikesK = 10
@@ -76,7 +76,7 @@ const (
 
 	// gammaMethodToken is the stable wire token consumers (renderers,
 	// read from the gateway's optional Greeks tick (fixes a v2 race
-	gammaMethodToken = "bs-gamma-profile-v3-stickymoneyness-0dte-split"
+	gammaMethodToken = "bs-gamma-profile-v4-local-sign-class-skew"
 
 	// MinLegCoverageFraction is the persist-or-not threshold: a
 	// IBKR gateway's OPT model-tick delivery is bursty during RTH —
@@ -88,7 +88,7 @@ var gammaMethodologyCitations = []string{
 	"Perfiliev (2022) — BS-sweep baseline",
 	"Derman / Daglish-Hull-Suo — sticky-moneyness skew dynamics",
 	"SqueezeMetrics (2017) — naive-sign GEX, deprecated 2022+",
-	"Cboe 2025 — 0DTE = ~59% of SPX volume",
+	"Cboe (2023) — SPX 0DTE market impact: net dealer positioning requires participant and trade-direction data",
 }
 
 // checkLegCoverage returns nil if the fan-out's leg-landing fraction
@@ -472,7 +472,7 @@ func countGammaIVSources(legs []legData) (modelTick, derivedMid, derivedClose in
 // permissive MinLegCoverageFractionSPX (~0.05) are the off-hours
 // posture.
 //
-// Methodology (bs-gamma-profile-v3-stickymoneyness-0dte-split):
+// Methodology (bs-gamma-profile-v4-local-sign-class-skew):
 //
 //  1. Snapshot SPY spot. Refuse on stale (data_type != live and not
 //     empty-pending) — the compute is anchored on a single spot and a
@@ -701,15 +701,15 @@ func computeGammaZeroFor(
 	progress.Store(90)
 
 	// 8. Zero crossings: combined + 0DTE + 1-7 + term.
-	zg, gammaSign := findZeroCrossing(profile)
+	zg, gammaSign := findZeroCrossing(profile, spot)
 	var gapPct *float64
 	if zg != nil {
 		v := (spot - *zg) / *zg * 100
 		gapPct = &v
 	}
-	zg0DTE, sign0DTE := findZeroCrossing(profile0DTE)
-	zg1to7, sign1to7 := findZeroCrossing(profile1to7)
-	zgTerm, signTerm := findZeroCrossing(profileTerm)
+	zg0DTE, sign0DTE := findZeroCrossing(profile0DTE, spot)
+	zg1to7, sign1to7 := findZeroCrossing(profile1to7, spot)
+	zgTerm, signTerm := findZeroCrossing(profileTerm, spot)
 
 	// 9. Top strikes by magnitude.
 	topStrikes := rankTopStrikesByAbsGEX(gexLegs, spot, topStrikesK, sym)
@@ -794,6 +794,11 @@ func computeGammaZeroFor(
 		GapPct:                  gapPct,
 		GammaSign:               gammaSign,
 		Profile:                 profile,
+		ProfileMetrics:          gammaProfileMetrics(gexLegs, spot, skewByExpiry, profile),
+		OptionSkews:             gammaOptionSkews(legs, spot),
+		ProfileMetrics0DTE:      gammaProfileMetrics(zeroDTELegs, spot, skewByExpiry, profile0DTE),
+		ProfileMetrics1to7:      gammaProfileMetrics(oneToSevenLegs, spot, skewByExpiry, profile1to7),
+		ProfileMetricsTerm:      gammaProfileMetrics(termLegs, spot, skewByExpiry, profileTerm),
 		ZeroGamma0DTE:           zg0DTE,
 		Profile0DTE:             profile0DTE,
 		GammaSign0DTE:           sign0DTE,
@@ -1164,7 +1169,7 @@ func gammaSourceFailureDiagnostic(
 func buildSkewCurves(legs []legData, snapshotSpot float64) (map[string]SkewCurve, map[string]rpc.SkewFitInfo, []string) {
 	byExpiry := map[string][]legData{}
 	for _, l := range legs {
-		byExpiry[l.expiryYMD] = append(byExpiry[l.expiryYMD], l)
+		byExpiry[gammaSkewKey(l)] = append(byExpiry[gammaSkewKey(l)], l)
 	}
 	curves := make(map[string]SkewCurve, len(byExpiry))
 	quality := make(map[string]rpc.SkewFitInfo, len(byExpiry))
@@ -1179,6 +1184,7 @@ func buildSkewCurves(legs []legData, snapshotSpot float64) (map[string]SkewCurve
 	for _, expYMD := range expiryOrder {
 		expLegs := byExpiry[expYMD]
 		curve := fitSkewCurve(expLegs, snapshotSpot)
+		curve.ok = gammaSkewCurvePositive(curve)
 		curves[expYMD] = curve
 		if !curve.ok {
 			fallbacks = append(fallbacks, expYMD)
@@ -1893,34 +1899,7 @@ func gammaCalendarDTE(expiryYMD, tradingClass string, now time.Time) (int, bool)
 // expiry only. Pass nil to disable skew lookups entirely (used by the
 // fallback test path).
 func sweepProfile(legs []legData, snapshotSpot, sweepRangePct float64, skewByExpiry map[string]SkewCurve) []rpc.GammaProfilePoint {
-	if snapshotSpot <= 0 || sweepRangePct <= 0 || sweepPoints < 2 {
-		return nil
-	}
-	loSpot := snapshotSpot * (1 - sweepRangePct)
-	hiSpot := snapshotSpot * (1 + sweepRangePct)
-	step := (hiSpot - loSpot) / float64(sweepPoints-1)
-
-	out := make([]rpc.GammaProfilePoint, sweepPoints)
-	for i := range sweepPoints {
-		scenarioSpot := loSpot + float64(i)*step
-		gex := 0.0
-		for _, l := range legs {
-			σ := l.iv
-			if skewByExpiry != nil {
-				curve, ok := skewByExpiry[l.expiryYMD]
-				if ok && curve.ok {
-					m := math.Log(l.strike / scenarioSpot)
-					if v := curve.IVAtMoneyness(m); v > 0 {
-						σ = v
-					}
-				}
-			}
-			γ := bsGamma(scenarioSpot, l.strike, l.dte, σ, 0, 0)
-			gex += dealerGEX(γ, float64(l.oi), 100, scenarioSpot, l.isCall)
-		}
-		out[i] = rpc.GammaProfilePoint{Spot: scenarioSpot, GEX: gex}
-	}
-	return out
+	return gammaSweep(legs, snapshotSpot, sweepRangePct, skewByExpiry)
 }
 
 // rankTopStrikesByAbsGEX returns the top-k legs ranked by sign-agnostic

@@ -1391,3 +1391,25 @@ test("TestBriefCardStaticContract replacement renders production narrative, safe
 
 // Breadth is a specific trading session's close, and the daemon keeps serving
 // The row rendered the percentages with nothing saying which day they came
+
+
+test("Regime option context preserves quality, horizon differences and safe prose", () => {
+  reset();
+  const cards = stress.regimeGammaDetails([{
+    underlying: "SPX", rankability: "blocked", data_type: "frozen", rankability_reason: "prior session",
+    interpretation: "Modeled hedging amplifies moves <img src=x onerror=boom>",
+    skew_interpretation: "Put-minus-call IV +3.0 vol points; not a directional forecast.",
+    horizons: [{ horizon: "0dte", regime: "short_gamma" }, { horizon: "term", regime: "long_gamma" }],
+    directional_inference: "Bullish/bearish positioning is unknown.",
+  }]);
+  assert.equal(cards.length, 1);
+  const text = cards[0].textContent;
+  assert.match(text, /blocked.*frozen/);
+  assert.match(text, /0dte: short gamma.*term: long gamma/);
+  assert.match(text, /Bullish\/bearish positioning is unknown/);
+  assert.ok(text.includes("<img src=x onerror=boom>"));
+  const hasImage = (node) => node.tagName === "IMG" || (node.children || []).some(hasImage);
+  assert.equal(hasImage(cards[0]), false);
+  const retained = stress.regimeGammaDetails([{ underlying: "SPX", rankability: "rankable" }], { degraded: true, status: "stale" });
+  assert.match(retained[0].textContent, /Last-known SPX.*Retained observation; regime authority stale/);
+});

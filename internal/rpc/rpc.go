@@ -395,11 +395,15 @@ type BreadthSPXParams struct {
 
 // BreadthDailyValue is one trailing daily breadth reading. The two
 type BreadthDailyValue struct {
-	Date           string  `json:"date"` // YYYY-MM-DD
-	PctAbove50DMA  float64 `json:"pct_above_50dma"`
-	PctAbove200DMA float64 `json:"pct_above_200dma,omitempty"`
-	NewHighs       int     `json:"new_highs,omitempty"`
-	NewLows        int     `json:"new_lows,omitempty"`
+	Date              string   `json:"date"` // YYYY-MM-DD
+	PctAbove50DMA     float64  `json:"pct_above_50dma"`
+	PctAbove200DMA    *float64 `json:"pct_above_200dma,omitempty"`
+	NewHighs          *int     `json:"new_highs"`
+	NewLows           *int     `json:"new_lows"`
+	MemberCount       int      `json:"member_count"`
+	Coverage50        int      `json:"coverage_50"`
+	Coverage200       int      `json:"coverage_200"`
+	CoverageHighsLows int      `json:"coverage_highs_lows"`
 }
 
 // BreadthState classifies the engine's compute-pipeline state at the
@@ -480,17 +484,20 @@ type BreadthSPXResult struct {
 	// PctAbove50DMA is the current fast-window reading: percentage of
 	// divergence. Zero is meaningful only when State == "ready" (a
 	PctAbove50DMA float64 `json:"pct_above_50dma"`
-	// PctAbove200DMA is the slow-window reading: percentage above the
-	// 200-day SMA. Caught the 1999 and 2021 cyclical tops cleanly.
-	// Bands per locked plan: below 40% = red / 40-60% = yellow / above
-	// 60% = green (calibrated to the post-Mag-7 era).
-	PctAbove200DMA float64 `json:"pct_above_200dma"`
+	// Coverage reports the separate denominators; secondary measurements
+	// are nil when no member has the required complete history.
+	MemberCount       int `json:"member_count"`
+	Coverage50        int `json:"coverage_50"`
+	Coverage200       int `json:"coverage_200"`
+	CoverageHighsLows int `json:"coverage_highs_lows"`
+	// PctAbove200DMA is the percentage above the 200-session SMA.
+	PctAbove200DMA *float64 `json:"pct_above_200dma"`
 	// NewHighsToday is the count of constituents whose latest close
-	NewHighsToday int `json:"new_highs_today"`
+	NewHighsToday *int `json:"new_highs_today"`
 	// NewLowsToday is the symmetric count for new 252-bar lows.
-	NewLowsToday int `json:"new_lows_today"`
+	NewLowsToday *int `json:"new_lows_today"`
 	// NetNewHighsPct is (NewHighsToday - NewLowsToday) / coverage × 100
-	NetNewHighsPct float64 `json:"net_new_highs_pct"`
+	NetNewHighsPct *float64 `json:"net_new_highs_pct"`
 	// History is the trailing daily series, oldest first. Length is
 	// bounded by BreadthSPXParams.HistoryDays. Each point carries
 	// both SMA readings plus the new-highs/lows counts.
@@ -829,18 +836,27 @@ type GammaZeroComputed struct {
 	// whole sweep landed on so the UI can say "all long-gamma" or "all
 	// short-gamma in window."
 	GammaSign string `json:"gamma_sign,omitempty"`
-	// Profile is the full (spot, gex) sweep, oldest first. 60 points
+	// Profile is the full (spot, gex) sweep, sorted by scenario spot.
 	Profile []GammaProfilePoint `json:"profile,omitempty"`
+	// ProfileMetrics retains exact local sign and detected crossings even
+	// on compact surfaces that omit the full scenario arrays.
+	ProfileMetrics     *GammaProfileMetrics `json:"profile_metrics,omitempty"`
+	ProfileMetrics0DTE *GammaProfileMetrics `json:"profile_metrics_0dte,omitempty"`
+	ProfileMetrics1to7 *GammaProfileMetrics `json:"profile_metrics_1to7,omitempty"`
+	ProfileMetricsTerm *GammaProfileMetrics `json:"profile_metrics_term,omitempty"`
+	// OptionSkews uses eligible observed IV observations regardless of OI availability.
+	OptionSkews []OptionSkew `json:"option_skews,omitempty"`
+	// Insight is a bounded explanation of this underlying's modeled book.
+	Insight *GammaInsight `json:"insight,omitempty"`
 
 	// GammaTotalAbs is the sign-agnostic magnitude signal at
 	// SpotUnderlying: Σ |Γ| × OI × 100 × SpotUnderlying² × 0.01. In
-	// dollar gamma terms — the total notional dealer hedging flow for
-	// a 1% underlying move, independent of any positioning assumption.
-	// Larger = market is more sensitive to dealer rebalancing.
+	// dollar gamma terms: gross sampled convexity scaled to a 1% move.
+	// This is not net dealer inventory or observed dealer hedging flow.
 	GammaTotalAbs float64 `json:"gamma_total_abs"`
 	// GammaTotalAbsConvention names the sign-handling for GammaTotalAbs
 	GammaTotalAbsConvention string `json:"gamma_total_abs_convention,omitempty"`
-	// TopStrikes is the top-N strikes ranked by absolute gamma notional.
+	// TopStrikes ranks individual option contracts by absolute gamma notional.
 	TopStrikes []StrikeConcentration `json:"top_strikes"`
 	// TopConcentrationPct is TopStrikes[0].AbsGEX / GammaTotalAbs × 100 —
 	TopConcentrationPct float64 `json:"top_concentration_pct,omitempty"`
@@ -1396,6 +1412,7 @@ type RegimeGammaZero struct {
 	//   - "diverge:0dte_vs_term"  0DTE and term buckets disagree
 	//                            (highest-information case — short-fuse
 	//                            flow disagrees with monthly positioning)
+	//   - "agree:partial_long/short/transition" — two covered buckets agree
 	//   - "diverge:partial"       other mixed cases (1-7 alone disagrees,
 	//                            only two usable buckets disagree, etc.)
 	//   - "0dte_only" / "1to7_only" / "term_only" — only one bucket is
@@ -1419,11 +1436,11 @@ type RegimeBreadth struct {
 	Notes         string           `json:"notes,omitempty"`
 	FieldsMissing []string         `json:"fields_missing,omitempty"`
 	// PctAbove50DMA / PctAbove200DMA / NewHighsToday / NewLowsToday /
-	PctAbove50DMA  float64 `json:"pct_above_50dma,omitempty"`
-	PctAbove200DMA float64 `json:"pct_above_200dma,omitempty"`
-	NewHighsToday  int     `json:"new_highs_today,omitempty"`
-	NewLowsToday   int     `json:"new_lows_today,omitempty"`
-	NetNewHighsPct float64 `json:"net_new_highs_pct,omitempty"`
+	PctAbove50DMA  float64  `json:"pct_above_50dma,omitempty"`
+	PctAbove200DMA *float64 `json:"pct_above_200dma,omitempty"`
+	NewHighsToday  *int     `json:"new_highs_today,omitempty"`
+	NewLowsToday   *int     `json:"new_lows_today,omitempty"`
+	NetNewHighsPct *float64 `json:"net_new_highs_pct,omitempty"`
 	// Per-scalar provenance for the breadth percentage. firm-live or
 	// because constituent coverage fell below the safety threshold.
 	ValueQuality *Quality `json:"value_quality,omitempty"`

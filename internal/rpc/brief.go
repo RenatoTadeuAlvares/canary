@@ -79,21 +79,31 @@ type BriefRegimeRow struct {
 // BriefBreadthRow summarizes breadth values and their observation time. Nil
 type BriefBreadthRow struct {
 	BriefRowState
-	PctAbove50DMA  *float64  `json:"pct_above_50dma,omitempty"`
-	PctAbove200DMA *float64  `json:"pct_above_200dma,omitempty"`
-	NetNewHighsPct *float64  `json:"net_new_highs_pct,omitempty"`
-	AsOf           time.Time `json:"as_of,omitzero"`
-	DataType       string    `json:"data_type,omitempty"`
+	MemberCount       int       `json:"member_count"`
+	Coverage50        int       `json:"coverage_50"`
+	Coverage200       int       `json:"coverage_200"`
+	CoverageHighsLows int       `json:"coverage_highs_lows"`
+	PctAbove50DMA     *float64  `json:"pct_above_50dma,omitempty"`
+	PctAbove200DMA    *float64  `json:"pct_above_200dma,omitempty"`
+	NetNewHighsPct    *float64  `json:"net_new_highs_pct,omitempty"`
+	AsOf              time.Time `json:"as_of,omitzero"`
+	DataType          string    `json:"data_type,omitempty"`
 }
 
 // BriefGammaRow summarizes the current zero-gamma relationship. Nil values
 type BriefGammaRow struct {
 	BriefRowState
-	Spot      *float64  `json:"spot,omitempty"`
-	ZeroGamma *float64  `json:"zero_gamma,omitempty"`
-	GapPct    *float64  `json:"gap_pct,omitempty"`
-	GammaSign string    `json:"gamma_sign,omitempty"`
-	AsOf      time.Time `json:"as_of,omitzero"`
+	Underlying     string               `json:"underlying,omitempty"`
+	Regime         string               `json:"regime,omitempty"`
+	Insight        *GammaInsight        `json:"insight,omitempty"`
+	Quality        *GammaSignalQuality  `json:"quality,omitempty"`
+	WarningDetails []GammaWarningDetail `json:"warning_details,omitempty"`
+	ProfileMetrics *GammaProfileMetrics `json:"profile_metrics,omitempty"`
+	Spot           *float64             `json:"spot,omitempty"`
+	ZeroGamma      *float64             `json:"zero_gamma,omitempty"`
+	GapPct         *float64             `json:"gap_pct,omitempty"`
+	GammaSign      string               `json:"gamma_sign,omitempty"`
+	AsOf           time.Time            `json:"as_of,omitzero"`
 }
 
 // BriefStressRow summarizes the current advisory action and severity.

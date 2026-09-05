@@ -2,7 +2,7 @@
 
 **Status:** Implemented and live since v1.0.0; migrated to the `daemon.db` authority on 2026-07-20.
 **Created:** 2026-05-22 07:30 CEST
-**Last update:** 2026-07-20
+**Last update:** 2026-09-05
 **Owner:** osauer
 **Related:** [internal/daemon/gamma_zero_cache.go](../../../internal/daemon/gamma_zero_cache.go), [internal/daemon/gamma_zero_store.go](../../../internal/daemon/gamma_zero_store.go), [Concepts](../understand/concepts.md#gamma)
 
@@ -72,7 +72,7 @@ wrong-scope value survive a daemon restart.
   "version": 1,
   "session_key": "2026-05-22",
   "scope": "spy+spx",
-  "method": "bs-gamma-profile-v3-stickymoneyness-0dte-split",
+  "method": "bs-gamma-profile-v4-local-sign-class-skew",
   "result": { "...": "rpc.GammaZeroComputed" }
 }
 ```
@@ -83,6 +83,9 @@ Four independent gates turn persisted state into a cold cache:
 - `session_key` does not match today's New York session date
 - envelope `scope` does not match the authority key/requested scope
 - `method` does not match the current gamma method token
+
+The v4 method adds local-sign metrics, refined crossings and class-scoped skew.
+Earlier current-state results become cold; immutable observations are retained.
 
 The store never migrates or coerces old results. A methodology bump should
 recompute from IBKR data, not reinterpret prior cache contents.

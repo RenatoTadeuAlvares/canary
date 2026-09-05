@@ -386,8 +386,10 @@ func composeBriefMarket(now time.Time, acct *rpc.AccountResult, pos *rpc.Positio
 			out.Breadth.BriefRowState = briefDegraded(detail + "; a newer session is overdue")
 		}
 		out.Breadth.PctAbove50DMA = new(breadth.PctAbove50DMA)
-		out.Breadth.PctAbove200DMA = new(breadth.PctAbove200DMA)
-		out.Breadth.NetNewHighsPct = new(breadth.NetNewHighsPct)
+		out.Breadth.PctAbove200DMA = breadth.PctAbove200DMA
+		out.Breadth.NetNewHighsPct = breadth.NetNewHighsPct
+		out.Breadth.MemberCount, out.Breadth.Coverage50 = breadth.MemberCount, breadth.Coverage50
+		out.Breadth.Coverage200, out.Breadth.CoverageHighsLows = breadth.Coverage200, breadth.CoverageHighsLows
 	}
 	if breadth != nil {
 		out.Breadth.AsOf, out.Breadth.DataType = breadth.AsOf, breadth.DataType
@@ -432,7 +434,13 @@ func composeBriefGamma(env *rpc.GammaZeroSPXResult, sessionOpen bool, now time.T
 	if spx := computed.PerIndex["SPX"]; spx != nil {
 		computed = spx
 	}
-	row.BriefRowState = briefOK("SPX dealer zero-gamma versus spot")
+	row.Underlying = gammaUnderlyingLabel(computed)
+	row.Regime = rpc.GammaComputedRegime(computed)
+	row.Insight = buildGammaInsight(computed)
+	row.Quality = computed.Quality
+	row.WarningDetails = append([]rpc.GammaWarningDetail(nil), computed.WarningDetails...)
+	row.ProfileMetrics = computed.ProfileMetrics
+	row.BriefRowState = briefOK(row.Underlying + " modeled gamma versus spot")
 	if computed.SpotUnderlying > 0 {
 		row.Spot = new(computed.SpotUnderlying)
 	}
@@ -449,6 +457,12 @@ func composeBriefGamma(env *rpc.GammaZeroSPXResult, sessionOpen bool, now time.T
 	if computed.Quality != nil && computed.Quality.Rankability != rpc.GammaRankabilityRankable &&
 		!(cadence == rpc.DataCadenceNotDue && !sessionOpen && gammaRankabilityCadenceOnly(computed.Quality)) {
 		row.BriefRowState = briefDegraded("gamma is context-only: " + computed.Quality.RankabilityReason)
+	}
+	if computed.Quality == nil {
+		row.BriefRowState = briefDegraded("gamma quality is unavailable")
+	}
+	if computed.Scope == rpc.GammaZeroScopeSPY {
+		row.BriefRowState = briefDegraded("SPY proxy context only; canonical SPX gamma is unavailable")
 	}
 	return row
 }

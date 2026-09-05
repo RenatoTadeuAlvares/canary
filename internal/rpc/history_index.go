@@ -9,6 +9,7 @@ import (
 	"github.com/osauer/canary/v2/internal/marketcal"
 	"github.com/osauer/canary/v2/internal/risk"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -803,6 +804,15 @@ func gammaIndexDepth(c *GammaZeroComputed) *float64 {
 	}
 	if c.GapPct != nil {
 		d := -*c.GapPct
+		if c.ProfileMetrics != nil {
+			d = 0
+			if c.ProfileMetrics.GEXAtSpot < 0 {
+				d = math.Abs(*c.GapPct)
+			}
+			if c.ProfileMetrics.GEXAtSpot > 0 {
+				d = -math.Abs(*c.GapPct)
+			}
+		}
 		return &d
 	}
 	if c.GammaSign == "negative" {

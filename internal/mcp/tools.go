@@ -241,7 +241,7 @@ var Tools = []Tool{
 	{
 		Name:         "canary_brief",
 		Title:        "Canary Daily Brief",
-		Description:  "Read-only current daily brief composed by the daemon. It never acknowledges the brief or writes to the journal. Drill into canary_positions or canary_account only when the brief points there.",
+		Description:  "Start here for the daemon's current desk and broad-market regime read: independent stress clusters, breadth coverage, modeled gamma response and expiry horizons, and observed 25-delta option skew. Preserve freshness, rankability, source warnings and unavailable values. Gamma models potential amplification or damping; open interest does not prove bullish/bearish intent or dealer inventory, and put-call skew is relative option pricing, not a forecast. Use canary_status to diagnose degraded sources and canary_edge for retrospective decision outcomes; drill into canary_positions or canary_account only when the brief points there. Read-only; never acknowledges the brief or writes to the journal.",
 		JSONSchema:   schemaObject(nil, nil),
 		ReadOnlyHint: new(true),
 		RPCMethods:   []string{rpc.MethodBriefSnapshot},

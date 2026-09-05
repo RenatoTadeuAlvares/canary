@@ -98,38 +98,83 @@ The order journal underneath heals itself. After every reconnect, and every 30 m
 
 ## Gamma
 
-Dealer zero-gamma is the spot price at which the aggregate options-dealer book switches from amplifying market moves (short-gamma, below zero) to stabilizing them (long-gamma, above zero). It is a regime hint rather than a precision level, and the qualitative state is what matters for short-horizon risk.
+Gamma describes a conditional response to market moves: positive modeled gamma
+suggests damping in either direction; negative modeled gamma suggests
+amplification. It does not predict whether the next move will be up or down.
 
-The regime authority's dealer-gamma row computes from IBKR option chains using
-the Perfiliev convention (dealers long calls, short puts), summed across the six
-nearest non-0DTE-post-settlement expirations at ±10% strike width. Two
-methodology choices shape the result.
+**SPX/SPXW is the production signal; SPY is corroboration.** The index and ETF
+books retain separate price levels, quality and expiry horizons. A missing SPY
+surface does not downgrade a healthy SPX result. SPY alone is labeled a proxy.
 
-**Sticky-moneyness skew** (`bs-gamma-profile-v3-stickymoneyness-0dte-split`). The spot sweep reprices each leg's IV at the scenario-spot's *moneyness* via a per-expiry quadratic skew curve fitted at snapshot time: sticky-moneyness rather than sticky-IV. Without this, the put-side skew biases zero-gamma estimates upward by 5–10%.
+The signed model assigns positive exposure to calls and negative exposure to
+puts. Open interest does not reveal customer/dealer ownership, opening/closing
+trades or intraday inventory, so this is an assumption, not an observed dealer
+book. Cboe explains why gross options activity cannot establish net dealer
+positioning in its [SPX 0DTE market-impact analysis](https://www.cboe.com/insights/posts/volatility-insights-evaluating-the-market-impact-of-spx-0-dte-options).
 
-**SPX/SPXW is the production signal; SPY is corroboration.** SPX index options are the canonical dealer-gamma book for the S&P 500. SPY (continuous ETF, retail flow) is useful context when its option surface is fresh and high quality, but missing or throttled SPY does not downgrade an otherwise fresh, rankable SPX result. When both books are usable, the diagnostic is **disagreement**: one book stabilizing while the other amplifies. The classifier reports `"agree:long-gamma"`, `"agree:short-gamma"`, `"agree:transition-gamma"`, or `"disagree"` directly. A crossing is long, transition, or short based on spot's distance from the identified γ-zero, not merely the existence of a crossing.
+**Local sign and crossings.** Method `bs-gamma-profile-v4-local-sign-class-skew`
+evaluates signed GEX at the actual observed spot. The sweep includes spot,
+strikes and extra points around narrow expiry kernels, then refines detected
+sign changes. It reports all detected crossings and selects the nearest one.
+Being above a crossing does not by itself mean positive gamma: a profile can
+have several crossings or reverse the usual orientation. Within the existing
+2% transition distance, the reading is transitional; farther away, local sign
+decides long or short gamma. A balanced signed reading with nonzero gross
+exposure is a transition, while absent measurements remain unavailable.
 
-Every result carries two complementary readings:
+Scenario IV preserves each leg's observed IV at spot, applying the relative
+change from a quadratic moneyness curve fitted separately for each trading
+class and expiry. SPX morning settlement and SPXW afternoon settlement are
+kept distinct. An unusable or nonpositive curve falls back consistently to
+sticky IV. The Black–Scholes model currently uses zero rates and dividends;
+this approximation and sampled chain coverage limit precision.
 
-- **Signed zero-gamma**: the price level itself, plus a `gamma_sign` ("positive"/"negative") describing the dealer book's posture at current spot.
-- **Sign-agnostic magnitude**: `gamma_total_abs` (sum of |Γ|·OI in notional terms) and `top_strikes`, the largest concentrations regardless of sign.
+**Expiry context.** The 0DTE, 1–7 DTE and term horizons each retain their own
+local sign, gross exposure share and availability. Disagreement can reveal
+short-lived amplification inside a broadly damping book. Missing horizons
+remain missing; agreement between two covered horizons is partial agreement.
 
-The Perfiliev sign convention assumes the standard "dealers long calls, short puts" book. Covered-call ETF flow or autocall hedging can invert the sign, so where those flows dominate, lean on the magnitude reading instead.
+**Downside versus upside pricing.** Eligible model-tick or live-mid IVs are
+interpolated between observed strikes bracketing 25-delta puts and calls in the
+same trading class and expiry. The selected expiry is the covered 7–60 day
+expiry nearest 30 days, with its actual tenor disclosed. Positive put-minus-call
+IV means richer downside protection; negative means richer upside exposure.
+This is pricing asymmetry, not a bullish/bearish probability. There is no
+extrapolation, no previous-close-derived IV in this comparison, and no invented
+value when either side is missing. The convention follows the put/call skew
+comparison in [Cboe's option-sentiment specifications](https://datashop.cboe.com/Documents/Cboe_OptionSentiment_Specs.pdf), without claiming its standardized 30-day index.
 
-How much weight a result may carry is stated on it, as `quality.rankability`. Missing OI is unknown, never zero.
+`gamma_total_abs` is gross sampled convexity scaled to a 1% move, not actual
+net dealer hedging flow. `top_strikes` retains individual option-contract
+concentrations, not aggregated strike walls. `profile_metrics.gex_at_spot` is
+the signed counterpart. Priced legs without observed OI may support skew, but
+cannot contribute OI-weighted exposure.
 
-[Sensors](sensors.md#gamma) has the operational side of both: what each rankability value permits, what a priced leg without observed OI can still support, and why absent 0DTE alone does not sink an otherwise healthy SPX surface. Compute timing and closed-session behavior live there too. [The gamma cache design](../internals/gamma-cache.md) covers the cache internals, including why a result survives a daemon restart.
+Quality, feed type, observation time, assumptions and missing data travel with
+the explanation through the daily Brief, CLI, MCP and app Monitor. Only the
+existing eligible gamma evidence may affect Regime; skew adds context and does
+not change trading thresholds. [Sensors](sensors.md#gamma) explains freshness
+and ranking. [Gamma cache design](../internals/gamma-cache.md) explains persistence.
 
 ## Breadth
 
 S&P 500 breadth tells you whether a rally is broad or narrow, which the index level alone cannot. Two readings carry the load:
 
-- **% above 50-DMA**, the tactical signal. >55 historically marks healthy uptrends; <40 with SPX at highs is the classic narrow-rally warning sign.
+- **% above 50-DMA**, the tactical signal. >55 is the existing green band; <40 with SPX at highs is the classic narrow-rally warning sign.
 - **% above 200-DMA**, the cyclical companion. It tops cleanly when the median name rolls over, even when the index is still being held up by mega-caps.
 
-The daemon also reports 52-week new-highs / new-lows counts and the derived `net_new_highs_pct`. SPX near highs with `net_new_highs_pct` near zero or negative is the most reliable narrow-rally fingerprint.
+The daemon also reports 52-week new-highs / new-lows counts and the derived `net_new_highs_pct`. SPX near highs with `net_new_highs_pct` near zero or negative is context for a narrow rally, not a validated forecast.
 
-IBKR does not redistribute S&P DJI's official breadth indices on retail subscriptions, so the daemon computes all three locally from the 500 constituent daily closes pulled via IBKR's historical-bar feed (methodology token: `constituent-fanout-50/200dma+nh-v2`). A once-daily post-close refresh (16:35 ET) slides each name's window forward.
+IBKR does not redistribute S&P DJI's official breadth indices on retail subscriptions, so the daemon computes all three locally from the 500 constituent daily closes pulled via IBKR's historical-bar feed (methodology token: `constituent-fanout-50/200dma+nh-v3`). A once-daily post-close refresh (16:35 ET) slides each name's window forward.
+
+Each percentage includes its own eligible-member denominator and total
+membership count. Missing 200-session or annual history is unavailable, never
+zero. Annual highs/lows compare the latest close with the preceding 252
+session closes; 253 closes are retained so a corrected latest close does not
+change the comparison window. The cold request spans 400 calendar days (the
+broker rounds this to `2 Y`), and refreshes catch up across missed calendar
+days. Invalid constituent responses preserve the last valid window and remain
+excluded when that window is not current.
 
 **Cold-start budget**: the first request against a fresh daemon takes about 74 minutes, because IBKR's historical-data pacing caps the constituent fan-out at ~6 names/min sustained. The response carries `state: "computing"` until done. After cold-start, the cache persists across daemon restarts and every subsequent call is instant.
 

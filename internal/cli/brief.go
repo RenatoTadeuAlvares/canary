@@ -191,6 +191,9 @@ func renderBriefReady(env *Env, ready rpc.BriefReadySection) {
 			breadth += fmt.Sprintf(" · 200-DMA %.1f%%", *ready.Breadth.PctAbove200DMA)
 		}
 	}
+	if ready.Breadth.MemberCount > 0 {
+		breadth += fmt.Sprintf(" · coverage 50d %d/%d; 200d %d/%d; 52w %d/%d", ready.Breadth.Coverage50, ready.Breadth.MemberCount, ready.Breadth.Coverage200, ready.Breadth.MemberCount, ready.Breadth.CoverageHighsLows, ready.Breadth.MemberCount)
+	}
 	briefLine(env, "breadth", ready.Breadth.BriefRowState, breadth)
 	gamma := "—"
 	if ready.Gamma.Spot != nil {
@@ -202,7 +205,14 @@ func renderBriefReady(env *Env, ready rpc.BriefReadySection) {
 			gamma += fmt.Sprintf(" · gap %+.1f%%", *ready.Gamma.GapPct)
 		}
 	}
-	briefLine(env, "dealer gamma", ready.Gamma.BriefRowState, gamma)
+	gamma = briefJoin(ready.Gamma.Underlying, strings.ReplaceAll(ready.Gamma.Regime, "_", " "), gamma)
+	briefLine(env, "modeled gamma", ready.Gamma.BriefRowState, gamma)
+	if insight := ready.Gamma.Insight; insight != nil {
+		fmt.Fprintln(env.Stdout, "    "+insight.Interpretation)
+		fmt.Fprintln(env.Stdout, "    "+insight.HorizonInterpretation)
+		fmt.Fprintln(env.Stdout, "    "+insight.SkewInterpretation)
+		fmt.Fprintln(env.Stdout, "    "+insight.Provenance)
+	}
 	// Action and severity are usually the same word; printing both reads as a
 	// stutter, so the pair collapses when equal (the SPA does the same).
 	severity := ready.Stress.Severity

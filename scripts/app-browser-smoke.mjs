@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { withRegimeInsights } from "../web/app/test/regime-insight-fixture.mjs";
 import { withEdgeLearning } from "../web/app/test/edge-learning-fixture.mjs";
 
 import { readFile } from "node:fs/promises";
@@ -281,6 +282,7 @@ async function runRound4SyntheticSmoke() {
       settings: syntheticSettings,
     },
   };
+  withRegimeInsights(bootstrap.snapshot, now);
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
     isMobile: true,
@@ -478,6 +480,14 @@ async function runRound4SyntheticSmoke() {
         title: heading.querySelector("h2")?.textContent?.trim() || "",
       })),
     }));
+    await page.locator("#regimeDetailToggle").click();
+    const regimeDetail = await page.locator("#regimeIndicators").innerText();
+    for (const expected of ["SPX · positioning context", "context_only for this snapshot", "0dte: short gamma", "1to7: unavailable", "term: long gamma", "richer downside protection", "positioning is unknown"]) {
+      if (!regimeDetail.includes(expected)) throw new Error(`Regime detail lost ${expected}`);
+    }
+    if (await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)) throw new Error("Regime detail overflows mobile viewport");
+    if (args["regime-screenshot"]) await page.locator("#regimeDetailPanel").screenshot({ path: args["regime-screenshot"] });
+    await page.locator("#regimeDetailToggle").click();
     await page.waitForFunction(() => document.getElementById("updateAction")?.hidden === false, { timeout: 5000 });
     const update = await page.evaluate(() => {
       const button = document.getElementById("updateAction");

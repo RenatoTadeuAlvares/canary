@@ -59,8 +59,8 @@ func TestEngineColdStartFetchesEveryName(t *testing.T) {
 		t.Errorf("cold-start fetch count: want %d, got %d", len(members), got)
 	}
 	for _, c := range fake.Calls {
-		if c.LookbackDays != RollingMaxBars+10 {
-			t.Errorf("cold lookback for %s: want %d, got %d", c.Symbol, RollingMaxBars+10, c.LookbackDays)
+		if c.LookbackDays != 400 {
+			t.Errorf("cold calendar lookback for %s: want 400, got %d", c.Symbol, c.LookbackDays)
 		}
 	}
 

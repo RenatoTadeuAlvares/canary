@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -32,11 +33,10 @@ type Options struct {
 	// Workers caps refresh concurrency. Each worker calls
 	// matching the IBKR-side historical-data pacing headroom. Setting
 	Workers int
-	// ColdLookbackDays is how many trailing daily bars to fetch for
-	// a name with no cached history. Defaults to WindowSize + 10 to
-	// absorb holiday gaps in the trailing 50 trading days.
+	// ColdLookbackDays is a calendar-day request for uncached history.
+	// The default 400 days covers 253 sessions; the broker rounds it to 2 Y.
 	ColdLookbackDays int
-	// WarmLookbackDays is how many trailing daily bars to fetch for
+	// WarmLookbackDays is the minimum calendar-day request for
 	// a name whose cached window is current except for today.
 	// Defaults to 2 — today's bar plus one for duplicate-detection
 	// during the same-session retry path.
@@ -169,9 +169,9 @@ func New(store *Store, fetcher BarFetcher, opts Options) *Engine {
 		e.workers = 6
 	}
 	if e.coldLookback <= 0 {
-		// RollingMaxBars + 10 trading-day pad. Pulling 262 bars in one
-		// fetch costs the same per-IBKR-request as pulling 60 (the
-		e.coldLookback = RollingMaxBars + 10
+		// HMDS duration is calendar days. Cover 253 sessions including
+		// weekends, exchange holidays and a modest publication margin.
+		e.coldLookback = 400
 	}
 	if e.warmLookback <= 0 {
 		e.warmLookback = 2
@@ -408,6 +408,7 @@ func (e *Engine) logFetchErrors(fetchErrs map[string]error) {
 type fetchPlan struct {
 	Symbol       string
 	LookbackDays int
+	Rebuild      bool
 }
 
 // planFetches walks the membership list and decides what to fetch
@@ -424,7 +425,13 @@ func (e *Engine) planFetches(members []string, cached map[string]ConstituentWind
 			// Already have the latest completed close — nothing to fetch.
 			continue
 		}
-		plan = append(plan, fetchPlan{Symbol: sym, LookbackDays: e.warmLookback})
+		last, err := time.Parse("2006-01-02", w.LastBarAt)
+		elapsed := int(e.clock().Sub(last).Hours()/24) + 7
+		if err != nil || elapsed >= e.coldLookback {
+			plan = append(plan, fetchPlan{Symbol: sym, LookbackDays: e.coldLookback, Rebuild: true})
+		} else {
+			plan = append(plan, fetchPlan{Symbol: sym, LookbackDays: max(e.warmLookback, elapsed)})
+		}
 	}
 	return plan
 }
@@ -477,6 +484,9 @@ dispatch:
 		wg.Go(func() {
 			defer func() { <-sem }()
 			bars, err := e.fetcher.FetchDaily(ctx, item.Symbol, item.LookbackDays)
+			if err == nil {
+				err = validateBars(bars)
+			}
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -488,7 +498,11 @@ dispatch:
 				e.recordRefreshProcessed(failure)
 				return
 			}
-			merged := mergeBars(windows[item.Symbol], bars, item.Symbol)
+			base := windows[item.Symbol]
+			if item.Rebuild {
+				base = ConstituentWindow{}
+			}
+			merged := mergeBars(base, bars, item.Symbol)
 			if constituentWindowsEqual(windows[item.Symbol], merged) {
 				e.recordRefreshProcessed("")
 				return
@@ -551,13 +565,25 @@ func (e *Engine) finalise(members []string, windows map[string]ConstituentWindow
 	}
 
 	// Convergence — publish the snapshot and history.
+	var above200 *float64
+	if snap.Coverage200 > 0 {
+		above200 = new(snap.PctAbove200DMA)
+	}
+	var highs, lows *int
+	if snap.CoverageHighsLows > 0 {
+		highs, lows = new(snap.NewHighsToday), new(snap.NewLowsToday)
+	}
 	e.mu.Lock()
 	history := appendHistory(e.history, HistoryPoint{
-		Date:           sessionKey,
-		PctAbove50DMA:  snap.PctAbove50DMA,
-		PctAbove200DMA: snap.PctAbove200DMA,
-		NewHighs:       snap.NewHighsToday,
-		NewLows:        snap.NewLowsToday,
+		Date:              sessionKey,
+		PctAbove50DMA:     snap.PctAbove50DMA,
+		PctAbove200DMA:    above200,
+		NewHighs:          highs,
+		NewLows:           lows,
+		MemberCount:       snap.MemberCount,
+		Coverage50:        snap.Coverage,
+		Coverage200:       snap.Coverage200,
+		CoverageHighsLows: snap.CoverageHighsLows,
 	})
 	e.mu.Unlock()
 
@@ -601,7 +627,23 @@ func appendHistory(existing []HistoryPoint, point HistoryPoint) []HistoryPoint {
 	return out
 }
 
-// mergeBars folds a list of fetched bars into an existing window.
+// validateBars rejects the entire response before any cached window changes.
+// Dropping individual bad rows would compress the trading-session window.
+func validateBars(bars []Bar) error {
+	previous := ""
+	for _, b := range bars {
+		if _, err := time.Parse("2006-01-02", b.Date); err != nil || len(b.Date) != 10 || (previous != "" && b.Date <= previous) {
+			return errors.New("invalid or unordered daily bar date")
+		}
+		if b.Close <= 0 || math.IsNaN(b.Close) || math.IsInf(b.Close, 0) {
+			return errors.New("invalid daily bar close")
+		}
+		previous = b.Date
+	}
+	return nil
+}
+
+// mergeBars folds a validated, chronological batch into an existing window.
 func mergeBars(w ConstituentWindow, bars []Bar, symbol string) ConstituentWindow {
 	if w.Symbol == "" {
 		w.Symbol = symbol
@@ -689,5 +731,17 @@ func (e *Engine) History(limit int) []HistoryPoint {
 	if limit > 0 && limit < len(src) {
 		src = src[len(src)-limit:]
 	}
-	return slices.Clone(src)
+	out := slices.Clone(src)
+	for i := range out {
+		if v := out[i].PctAbove200DMA; v != nil {
+			out[i].PctAbove200DMA = new(*v)
+		}
+		if v := out[i].NewHighs; v != nil {
+			out[i].NewHighs = new(*v)
+		}
+		if v := out[i].NewLows; v != nil {
+			out[i].NewLows = new(*v)
+		}
+	}
+	return out
 }

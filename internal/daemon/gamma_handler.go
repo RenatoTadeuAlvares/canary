@@ -798,6 +798,7 @@ func hydrateGammaComputed(c *rpc.GammaZeroComputed) *rpc.GammaZeroComputed {
 	} else {
 		c.WarningDetails = buildGammaWarningDetails(c)
 	}
+	c.Insight = buildGammaInsight(c)
 	c.Summary = buildGammaSummary(c)
 	return c
 }
@@ -963,6 +964,9 @@ func gammaIndexStatement(s rpc.GammaIndexSummary) string {
 			return fmt.Sprintf("%s zero-gamma %s", label, formatGammaSummaryPrice(*s.ZeroGamma))
 		}
 	case "none_in_window":
+		if s.Regime == "transition_gamma" {
+			return label + " signed gamma balances at spot"
+		}
 		rangeText := gammaSummaryRange(s.SweepLowAbs, s.SweepHighAbs)
 		regime := strings.ReplaceAll(s.Regime, "_", "-")
 		if rangeText != "" && regime != "" {
@@ -986,7 +990,10 @@ func gammaZeroStatusAndRegime(c *rpc.GammaZeroComputed) (string, string) {
 		return "unavailable", "unavailable"
 	}
 	if c.ZeroGamma != nil {
-		return "crossing", rpc.GammaRegimeFromGap(c.GapPct)
+		return "crossing", rpc.GammaComputedRegime(c)
+	}
+	if c.ProfileMetrics != nil && c.ProfileMetrics.GrossGEXAtSpot > 0 {
+		return "none_in_window", rpc.GammaComputedRegime(c)
 	}
 	if c.LegCount > 0 && c.GammaTotalAbs == 0 && gammaProfileAllZero(c.Profile) {
 		return "unavailable", "unavailable"
@@ -1015,6 +1022,8 @@ func gammaInterpretation(c *rpc.GammaZeroComputed, status, regime string) string
 		}
 	case "none_in_window":
 		switch regime {
+		case "transition_gamma":
+			return "signed gamma balances at spot; gross option gamma remains present"
 		case "long_gamma":
 			return "no crossing; model stayed long-gamma across the swept range"
 		case "short_gamma":
