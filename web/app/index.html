@@ -153,6 +153,8 @@
               <span class="panel-time" id="stressAsOf" title="Portfolio stress freshness">--</span>
             </span>
           </div>
+          <div class="pd-placard pd-depth-link" id="moversPlacard" role="button" tabindex="0" aria-controls="positionsTab" aria-label="Open positions" hidden>Daily P/L by name</div>
+          <div class="pd-movers pd-depth-link" id="moversRow" role="button" tabindex="0" aria-controls="positionsTab" aria-label="Open positions" hidden></div>
           <div class="pd-tile pd-master" id="masterAnnunciator" role="group" aria-label="Master annunciator">
             <span class="pd-tile__bar" aria-hidden="true"></span>
             <b class="pd-master__legend" id="marketRegime">--</b>
@@ -240,8 +242,7 @@
               <div class="pd-tile__fig delta-tile__sub" id="deltaTileSub">--</div>
             </div>
           </div>
-          <!-- Desk detail expands directly under the Desk grid, above the
-               movers row, so it reads as part of its own section. -->
+          <!-- Desk detail expands directly under its own grid. -->
           <div class="signal-detail-col detail-panel detail-panel--dark" id="stressDetailPanel" hidden>
             <div class="detail-grid" id="stressDetailGrid"></div>
             <div class="held-stress" id="heldStressPanel" hidden>
@@ -270,8 +271,6 @@
             </div>
             <p class="regime-governed-note" id="marketRegimeMix" hidden>Waiting for market evidence</p>
           </div>
-          <div class="pd-placard pd-depth-link" id="moversPlacard" role="button" tabindex="0" aria-controls="positionsTab" aria-label="Open positions" hidden>Daily P/L by name</div>
-          <div class="pd-movers pd-depth-link" id="moversRow" role="button" tabindex="0" aria-controls="positionsTab" aria-label="Open positions" hidden></div>
         </article>
 
         <article class="panel portfolio-panel" id="portfolioPanel" data-open="false">

@@ -2141,6 +2141,7 @@ p {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
+  margin-bottom: 20px;
   padding: 5px 2px 0;
   font-size: 14px;
 }
