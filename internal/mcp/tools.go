@@ -241,6 +241,30 @@ var Tools = []Tool{
 	},
 
 	{
+		Name:        "canary_calendar",
+		Title:       "Canary Market Calendar",
+		Description: "Read official exchange sessions to plan work around market opens, closes, holidays, and early closes. Supports US cash equities, US listed options, and Xetra. Preserve timezone, source, coverage bounds, and session.state: unknown is not closed and cannot supply a trading schedule. This is an exchange-session calendar, not an economic-release or earnings calendar; use canary_brief for current held-name event context. Read-only; no scheduling, refresh, or broker actions.",
+		JSONSchema: schemaObject(map[string]json.RawMessage{
+			"market": schemaEnum([]string{"us", "us-options", "de"}, "exchange-session market; default us. US listed options models the regular 16:15 session; per-class exceptions and global/curb hours are not modeled"),
+			"date":   schemaString("optional YYYY-MM-DD in the market timezone; evaluates that date at local noon. Omit for now; at takes precedence when both are supplied"),
+			"at":     schemaString("optional RFC3339 instant including a timezone offset; evaluates the market at that instant and takes precedence over date"),
+			"days":   json.RawMessage(`{"type":"integer","minimum":1,"maximum":400,"description":"number of forward calendar dates including the selected date, not trading sessions; default 14, maximum 400"}`),
+		}, nil),
+		ReadOnlyHint: new(true),
+		RPCMethods:   []string{rpc.MethodMarketCalendar},
+		Handler: func(ctx context.Context, conn *dial.Conn, args json.RawMessage) (json.RawMessage, error) {
+			var in rpc.MarketCalendarParams
+			if err := unmarshalArgs(args, &in); err != nil {
+				return nil, err
+			}
+			var res rpc.MarketCalendarResult
+			if err := conn.Call(ctx, rpc.MethodMarketCalendar, in, &res); err != nil {
+				return nil, err
+			}
+			return json.Marshal(res)
+		},
+	},
+	{
 		Name: "canary_regime", Title: "Canary Market Regime",
 		Description:  "Read the detailed broad-market regime: all eight indicators, independent clusters, confirmation eligibility, gamma horizons and skew, source health, and stale or unavailable evidence. Use after canary_brief or for an explicit market-regime question; use canary_stress for how that market state affects the held portfolio. Gamma is a conditional amplification/damping model; open interest does not identify dealer inventory or market direction. Read-only; no history or refresh controls.",
 		JSONSchema:   schemaObject(map[string]json.RawMessage{"include_profiles": json.RawMessage(`{"type":"boolean","description":"Include large gamma profile arrays; false by default. Scalar measurements, thresholds, warnings and freshness are always retained."}`)}, nil),

@@ -335,9 +335,12 @@ type TechnicalResult struct {
 	AsOf           time.Time      `json:"as_of"`
 }
 
-// MarketCalendarParams requests official exchange-session context. Market is
-// daemon normalizes it to the stable result.market token. Date is YYYY-MM-DD
-// for the market state at that exact instant. Days controls how many calendar
+// MarketCalendarParams requests official exchange-session context. The daemon
+// normalizes Market to the stable result.market token. Date is YYYY-MM-DD in
+// that market's timezone and is evaluated at local noon. A nonzero At takes
+// precedence over Date and queries the market at that exact instant. Days is
+// the number of forward calendar dates, including the selected date; zero or
+// negative selects 14, and values above 400 are capped at 400.
 type MarketCalendarParams struct {
 	Market string    `json:"market,omitempty"`
 	Date   string    `json:"date,omitempty"`
@@ -345,7 +348,10 @@ type MarketCalendarParams struct {
 	Days   int       `json:"days,omitempty"`
 }
 
-// MarketSession is one official market-calendar row. Open/Close are present
+// MarketSession is one official market-calendar row. Open and Close are present
+// only for supported trading dates. State unknown means the date is outside
+// official coverage, not that the market is closed. IsOpen describes the queried
+// instant; future rows describe schedules and do not assert live market state.
 type MarketSession struct {
 	Market        string     `json:"market"`
 	Label         string     `json:"label,omitempty"`

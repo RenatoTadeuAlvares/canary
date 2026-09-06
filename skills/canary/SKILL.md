@@ -1,13 +1,13 @@
 ---
 name: canary
 description: Use Canary through the local `canary` CLI for the daily brief,
-  detailed regime and portfolio stress, account and position detail, historical Edge decision review, named-symbol
+  detailed regime and portfolio stress, official exchange sessions, account and position detail, historical Edge decision review, named-symbol
   technical analysis, desk policy and
   rules, protection proposals, option-exercise opportunities, runtime settings,
   and order status or history. Read first; broker writes require an explicit
   transaction-specific request and the gated CLI path.
 allowed-tools: Bash(canary account*) Bash(canary positions*) Bash(canary technical*)
-  Bash(canary regime*) Bash(canary stress*) Bash(canary brief*) Bash(canary edge*) Bash(canary rules*) Bash(canary proposals status*) Bash(canary proposals list*) Bash(canary proposals refresh*) Bash(canary opportunities status*) Bash(canary opportunities list*) Bash(canary opportunities refresh*) Bash(canary settings show*) Bash(canary policy show*) Bash(canary recon show*) Bash(canary trading status*) Bash(canary orders open*) Bash(canary orders history*) Bash(canary order status*)
+  Bash(canary calendar*) Bash(canary regime*) Bash(canary stress*) Bash(canary brief*) Bash(canary edge*) Bash(canary rules*) Bash(canary proposals status*) Bash(canary proposals list*) Bash(canary proposals refresh*) Bash(canary opportunities status*) Bash(canary opportunities list*) Bash(canary opportunities refresh*) Bash(canary settings show*) Bash(canary policy show*) Bash(canary recon show*) Bash(canary trading status*) Bash(canary orders open*) Bash(canary orders history*) Bash(canary order status*)
   Bash(canary status*) Bash(canary version*)
 ---
 
@@ -37,6 +37,13 @@ trend, relative strength, ATR, and liquidity evidence. It is analysis, not an
 order-entry path.
 
 ## Market regime and portfolio stress
+
+Use `canary calendar --json` / `canary_calendar` for official exchange sessions,
+holidays and early closes (`market`: `us`, `us-options`, `de`). Preserve the
+market timezone, source, coverage bounds and returned times. `unknown` is not
+closed and cannot supply a schedule. This is not an economic-release calendar;
+earnings context already appears in the brief. Scheduling work does not grant
+broker-write authority.
 
 Use `canary regime --json` / `canary_regime` for all eight broad-market
 indicators, independent clusters, confirmation eligibility, source health,

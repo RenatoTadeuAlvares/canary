@@ -53,7 +53,7 @@ assert_rejected old-cli-argv 'exec.Command("ibkr", "status")'
 assert_rejected old-product-name '"name": "ibkr"'
 assert_rejected old-mcp-tool 'tool = "ibkr_status"'
 assert_rejected retired-public-surface 'run `canary gamma --json`' README.md
-printf '%s\n' 'Use `canary regime --json`, `canary stress --json`, `canary_regime`, and `canary_stress`.' > "$test_root/README.md"
+printf '%s\n' 'Use `canary regime --json`, `canary stress --json`, `canary calendar --json`, `canary_regime`, `canary_stress`, and `canary_calendar`.' > "$test_root/README.md"
 git -C "$test_root" add README.md
 "$checker" "$test_root" >/dev/null
 git -C "$test_root" rm -q -f README.md

@@ -4,7 +4,7 @@
 
 These are the tools `canary mcp` exposes to MCP clients (Claude Code, Claude Desktop, or any other MCP host). Every public tool uses the canonical `canary_*` namespace. Each entry lists the tool name an LLM picks against, the description the LLM reads to decide whether to invoke, and the parameter schema the LLM binds against.
 
-**18 tools** total. Listed in registration order, aligned with the agent-appropriate CLI commands. Local lifecycle commands such as `setup`, `update`, `restart`, `mcp`, `daemon`, and `version` are intentionally excluded from MCP tools.
+**19 tools** total. Listed in registration order, aligned with the agent-appropriate CLI commands. Local lifecycle commands such as `setup`, `update`, `restart`, `mcp`, `daemon`, and `version` are intentionally excluded from MCP tools.
 
 ## `canary_status`
 
@@ -92,6 +92,19 @@ Analyze explicitly named stock or ETF symbols using daily trend, relative streng
 | `market` | string | no | optional route for symbols, not the benchmark; omit/use us for SMART/USD, use de for Xetra/IBIS EUR equities |
 | `primary_exchange` | string | no | optional primary-exchange hint for symbols, e.g. ARCA for ETFs or IBIS for Xetra |
 | `symbols` | array | **yes** | ticker symbols, e.g. ["AAPL","MSFT","NVDA"] |
+
+## `canary_calendar`
+
+Read official exchange sessions to plan work around market opens, closes, holidays, and early closes. Supports US cash equities, US listed options, and Xetra. Preserve timezone, source, coverage bounds, and session.state: unknown is not closed and cannot supply a trading schedule. This is an exchange-session calendar, not an economic-release or earnings calendar; use canary_brief for current held-name event context. Read-only; no scheduling, refresh, or broker actions.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `at` | string | no | optional RFC3339 instant including a timezone offset; evaluates the market at that instant and takes precedence over date |
+| `date` | string | no | optional YYYY-MM-DD in the market timezone; evaluates that date at local noon. Omit for now; at takes precedence when both are supplied |
+| `days` | integer | no | number of forward calendar dates including the selected date, not trading sessions; default 14, maximum 400 |
+| `market` | string | no | exchange-session market; default us. US listed options models the regular 16:15 session; per-class exceptions and global/curb hours are not modeled |
 
 ## `canary_regime`
 

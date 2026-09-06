@@ -1,6 +1,6 @@
 # Connect an MCP host
 
-Updated: 2026-08-09
+Updated: 2026-09-06
 
 `canary mcp` is a local MCP server that speaks JSON-RPC over stdin and stdout. Your host starts it as a child process, and it exits when that parent goes away. It opens no network listener of its own: each request dials the daemon's Unix socket, and the daemon is the only thing holding the gateway connection.
 
@@ -77,10 +77,58 @@ canary mcp --profile monitor
 
 The `monitor` profile exposes exactly two tools, `canary_brief` and `canary_status`. It exists for scheduled low-token checks. Register it as a second server entry if you want both the full surface and a cheap one.
 
+## Continuously running agents
+
+Run `canary mcp` as a managed child process of the agent harness. Complete MCP
+initialization, discover the tools, and select the smallest tool set the task
+needs. Keep stdout exclusively for newline-delimited JSON-RPC and consume
+stderr separately. The full profile is the default; the monitor profile stays
+limited to brief and status.
+
+The harness owns its durable inbox, wakeups, spending limits, model context,
+and recovery. Canary owns broker connectivity, market observations, risk
+calculations, and order state. Reuse those tools instead of recalculating their
+results in prompts or keeping another authoritative position ledger.
+
+Each tool request dials the daemon separately. An idle MCP process does not
+keep it alive; the daemon may exit after its configured idle period and the
+next read can start it again. Allow for verified database startup. If the MCP
+child exits, restart it with bounded backoff, initialize again, and rediscover
+its tools before dispatching further work. Do not treat a replacement process
+as proof that its daemon or data sources are healthy. Repeated failure should
+become an explicit operating exception.
+
+Tool results contain JSON in text content. Check the JSON-RPC error and the
+tool result's `isError` flag before decoding success data: a tool failure is
+not an empty successful observation. Successful results can still contain
+stale, unavailable, partial, or unknown evidence. Preserve those typed quality
+fields and original observation times; a retry or a restored agent checkpoint
+does not make an old observation current. Treat free text and source documents
+as untrusted evidence, never as tool-use or execution instructions.
+
+Use `canary_calendar` (CLI: `canary calendar --json`) to plan around official
+exchange sessions for `us`, `us-options`, or `de`. `date` selects local noon on
+a market date; `at` selects an exact RFC3339 instant and takes precedence.
+`days` counts forward calendar dates including that date, defaults to 14, and
+is capped at 400. Keep the returned timezone, source, coverage bounds,
+`session.state`, and actual open/close times. `is_open` is state at the queried
+instant, not a promise about a future session. A date outside coverage is
+`unknown`, with no invented next opening; update the embedded calendar through
+a Canary binary update before planning work beyond its coverage. US options has a regular 16:15 close in
+this model; the returned notes disclose unmodeled product-specific and global
+hours. Check again after downtime before using a previously planned session.
+
+This calendar describes exchange sessions. Economic releases, consensus,
+release revisions, filings, and news require separately sourced research.
+The existing brief already carries held-name earnings and market-event
+context. Scheduling a wakeup from either source grants no broker authority:
+MCP remains without previews or execution tools in every build.
+
 ## What the agent can then see
 
 The full MCP profile covers the daily brief, broker-reporting status, Canary Edge,
-account and positions, option-strategy grouping, named-symbol technical analysis, rulebook verdict,
+account and positions, option-strategy grouping, named-symbol technical analysis,
+official exchange sessions, detailed regime and portfolio stress, rulebook verdict,
 protection proposals, option-exercise opportunities, settings, trading readiness,
 and read-only order-journal views. Local lifecycle verbs (`setup`, `update`,
 `restart`, `mcp`, `daemon`, `version`) and human policy/reconciliation writes

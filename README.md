@@ -115,6 +115,14 @@ Use `which canary` to find the path. A browser-only agent cannot reach this
 local stdio process. After upgrading, fully relaunch the host so it respawns
 the MCP server.
 
+Continuously running agents can keep this MCP child process available and
+reuse Canary's brief, calendar, regime, risk, and order evidence. Use
+`canary_calendar` for official exchange sessions and coverage bounds; it is not
+an economic-release calendar. The host owns durable wakeups, model budgets,
+and process recovery. Canary owns the observations and risk semantics. See
+[continuous hosts](docs/docs/start/hosts.md#continuously-running-agents) for
+the lifecycle and data-quality contract.
+
 Ask in desk language rather than naming tools:
 
 > How is my portfolio exposed by underlying?
@@ -143,6 +151,7 @@ canary rules
 canary regime --explain
 canary stress --details
 canary technical SPY,QQQ
+canary calendar --market us --days 14
 canary proposals list
 canary opportunities list
 canary orders open
