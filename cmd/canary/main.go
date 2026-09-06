@@ -18,6 +18,7 @@ import (
 	"github.com/osauer/canary/v2/internal/dial"
 	"github.com/osauer/canary/v2/internal/productidentity"
 	"github.com/osauer/canary/v2/internal/rpc"
+	"github.com/osauer/canary/v2/internal/stress"
 )
 
 var (
@@ -188,7 +189,7 @@ func retiredProductEnvError(lookup func(string) (string, bool)) error {
 func unaryInvocationBudget(cmd string, rest []string) time.Duration {
 	// Integration builds deliberately override these strings with tiny values
 	// to exercise cancellation paths. Preserve that test seam exactly; normal
-	longClass := cmd == "technical" || cmd == "brief"
+	longClass := cmd == "technical" || cmd == "brief" || cmd == "stress"
 	if cliUnaryTimeout != "60s" || cliLongUnaryTimeout != "90s" {
 		if longClass {
 			return parseDurationOr(cliLongUnaryTimeout, 90*time.Second)
@@ -215,6 +216,10 @@ func cliInvocationTiming(cmd string, rest []string) ([]string, time.Duration, ti
 		return []string{rpc.MethodPositionsList}, ordinaryHeadroom, ordinaryFloor
 	case "technical":
 		return []string{rpc.MethodTechnical}, 15 * time.Second, longFloor
+	case "regime":
+		return []string{rpc.MethodRegimeSnapshot}, ordinaryHeadroom, ordinaryFloor
+	case "stress":
+		return stress.FetchMethods(), ordinaryHeadroom, stress.FetchTimeout(ordinaryHeadroom)
 	case "brief":
 		return []string{rpc.MethodBriefSnapshot}, 15 * time.Second, longFloor
 	case "rules":

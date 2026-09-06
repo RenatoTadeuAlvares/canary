@@ -35,6 +35,8 @@ The MCP read never stamps or acknowledges the report.
 Drill into narrower evidence only when needed:
 
 - `canary_account` and `canary_positions` provide account-scoped detail.
+- `canary_regime` returns the eight market indicators, cluster confirmation, and source health.
+- `canary_stress` returns full portfolio-risk evidence, including margin, exposure, concentration, options, and protection.
 - `canary_rules` explains policy adherence and unknown inputs.
 - `canary_technical` analyzes explicitly named stock or ETF symbols.
 - `canary_proposals` reads close/reduce-only protection candidates.

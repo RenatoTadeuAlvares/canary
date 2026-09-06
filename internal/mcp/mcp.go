@@ -17,6 +17,7 @@ import (
 
 	"github.com/osauer/canary/v2/internal/dial"
 	"github.com/osauer/canary/v2/internal/rpc"
+	"github.com/osauer/canary/v2/internal/stress"
 )
 
 // ProtocolVersion is the MCP spec revision we advertise. 2025-03-26 is the
@@ -261,7 +262,7 @@ func (s *Server) instructions() string {
 	if s.profile == ProfileMonitor {
 		return "Read-only Canary monitor profile. Read `canary_brief` first; use `canary_status` only for connectivity or degraded-input troubleshooting."
 	}
-	return "Read-only Canary desk tools. Start with `canary_brief`; use `canary_edge` only for retrospective decision review, and drill into account, positions, rules, named-symbol technical analysis, proposals, opportunities, or order history only when the brief points there."
+	return "Read-only Canary desk tools. Start with `canary_brief`; use `canary_edge` only for retrospective decision review, and drill into regime, portfolio stress, account, positions, rules, named-symbol technical analysis, proposals, opportunities, or order history only when the brief points there."
 }
 
 // toolDescriptor is the wire shape MCP expects in tools/list.
@@ -453,6 +454,8 @@ func mcpToolCallTimeout(name string, args json.RawMessage) time.Duration {
 	case "canary_status":
 		headroom = mcpFastToolHeadroom
 		floor = 0
+	case "canary_stress":
+		floor = stress.FetchTimeout(headroom)
 	case "canary_technical":
 		floor = mcpAnalysisToolFloor
 	}

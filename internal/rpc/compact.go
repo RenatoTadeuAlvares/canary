@@ -254,7 +254,7 @@ func CompactRegimeMonitor(r *RegimeSnapshotResult) RegimeMonitorResult {
 			{Name: "Funding", Status: r.FundingStress.Status, Cluster: RegimeIndicatorCluster(RegimeIndicatorFunding), Band: r.FundingStress.Band, AsOf: regimeAsOf(r.FundingStress.AsOf, r.FundingStress.AsOfDate), Reading: readingJoin(formatPtr("spread bp", r.FundingStress.SpreadBps), formatPtr("5obs bp", r.FundingStress.Change5Bps)), Thresholds: r.FundingStress.Thresholds, Eligibility: r.FundingStress.Eligibility, FreshnessClass: freshnessClass(r.FundingStress.Freshness)},
 			{Name: "USD/JPY", Status: r.USDJPY.Status, Cluster: RegimeIndicatorCluster(RegimeIndicatorUSDJPY), Band: r.USDJPY.Band, AsOf: r.USDJPY.AsOf, Reading: readingJoin(formatPtr("last", r.USDJPY.Last), formatPtr("week%", r.USDJPY.WeeklyChange), range52WReading(r.USDJPY.Range52W)), Thresholds: r.USDJPY.Thresholds, Eligibility: r.USDJPY.Eligibility, FreshnessClass: freshnessClass(r.USDJPY.Freshness)},
 			{Name: "Gamma", Status: r.GammaZero.Status, Cluster: RegimeIndicatorCluster(RegimeIndicatorGammaZero), Band: r.GammaZero.Band, AsOf: r.GammaZero.AsOf, Reading: gammaMonitorReading(r.GammaZero), Thresholds: r.GammaZero.Thresholds, Eligibility: r.GammaZero.Eligibility, FreshnessClass: freshnessClass(r.GammaZero.Freshness)},
-			{Name: "Breadth", Status: r.Breadth.Status, Cluster: RegimeIndicatorCluster(RegimeIndicatorBreadth), Band: r.Breadth.Band, AsOf: r.Breadth.AsOf, Reading: readingJoin(formatFloat("50dma%", r.Breadth.PctAbove50DMA), formatPtr("200dma%", r.Breadth.PctAbove200DMA), formatPtr("net highs%", r.Breadth.NetNewHighsPct), fmt.Sprintf("coverage 50d %d/%d; 200d %d/%d; 52w %d/%d", r.Breadth.Envelope.Coverage50, r.Breadth.Envelope.MemberCount, r.Breadth.Envelope.Coverage200, r.Breadth.Envelope.MemberCount, r.Breadth.Envelope.CoverageHighsLows, r.Breadth.Envelope.MemberCount)), Thresholds: r.Breadth.Thresholds, Eligibility: r.Breadth.Eligibility, FreshnessClass: freshnessClass(r.Breadth.Freshness)},
+			{Name: "Breadth", Status: r.Breadth.Status, Cluster: RegimeIndicatorCluster(RegimeIndicatorBreadth), Band: r.Breadth.Band, AsOf: r.Breadth.AsOf, Reading: readingJoin(regimeBreadth50Reading(r.Breadth), formatPtr("200dma%", r.Breadth.PctAbove200DMA), formatPtr("net highs%", r.Breadth.NetNewHighsPct), fmt.Sprintf("coverage 50d %d/%d; 200d %d/%d; 52w %d/%d", r.Breadth.Envelope.Coverage50, r.Breadth.Envelope.MemberCount, r.Breadth.Envelope.Coverage200, r.Breadth.Envelope.MemberCount, r.Breadth.Envelope.CoverageHighsLows, r.Breadth.Envelope.MemberCount)), Thresholds: r.Breadth.Thresholds, Eligibility: r.Breadth.Eligibility, FreshnessClass: freshnessClass(r.Breadth.Freshness)},
 		},
 	}
 }
@@ -1462,4 +1462,12 @@ func boolFingerprint(v bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// regimeBreadth50Reading distinguishes a missing scalar from a measured zero.
+func regimeBreadth50Reading(row RegimeBreadth) string {
+	if row.Envelope.Coverage50 <= 0 || (row.Status != RegimeStatusOK && row.Status != RegimeStatusStale) {
+		return "50dma% unavailable"
+	}
+	return fmt.Sprintf("50dma%% %.2f", row.PctAbove50DMA)
 }

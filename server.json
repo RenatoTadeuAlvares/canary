@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.osauer/canary",
   "title": "Canary MCP",
-  "description": "Read-only IBKR MCP: account, positions, daily brief, reporting status, Edge, and risk.",
-  "version": "3.3.2",
+  "description": "Read-only IBKR MCP: account, positions, brief, regime, stress, reporting, Edge, and risk.",
+  "version": "3.4.0",
   "websiteUrl": "https://osauer.dev/canary/",
   "repository": {
     "url": "https://github.com/osauer/canary",

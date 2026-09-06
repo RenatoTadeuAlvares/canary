@@ -140,6 +140,8 @@ canary positions --by underlying
 canary brief
 canary edge
 canary rules
+canary regime --explain
+canary stress --details
 canary technical SPY,QQQ
 canary proposals list
 canary opportunities list

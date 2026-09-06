@@ -4,7 +4,7 @@
 
 These are the tools `canary mcp` exposes to MCP clients (Claude Code, Claude Desktop, or any other MCP host). Every public tool uses the canonical `canary_*` namespace. Each entry lists the tool name an LLM picks against, the description the LLM reads to decide whether to invoke, and the parameter schema the LLM binds against.
 
-**16 tools** total. Listed in registration order, aligned with the agent-appropriate CLI commands. Local lifecycle commands such as `setup`, `update`, `restart`, `mcp`, `daemon`, and `version` are intentionally excluded from MCP tools.
+**18 tools** total. Listed in registration order, aligned with the agent-appropriate CLI commands. Local lifecycle commands such as `setup`, `update`, `restart`, `mcp`, `daemon`, and `version` are intentionally excluded from MCP tools.
 
 ## `canary_status`
 
@@ -93,9 +93,25 @@ Analyze explicitly named stock or ETF symbols using daily trend, relative streng
 | `primary_exchange` | string | no | optional primary-exchange hint for symbols, e.g. ARCA for ETFs or IBIS for Xetra |
 | `symbols` | array | **yes** | ticker symbols, e.g. ["AAPL","MSFT","NVDA"] |
 
+## `canary_regime`
+
+Read the detailed broad-market regime: all eight indicators, independent clusters, confirmation eligibility, gamma horizons and skew, source health, and stale or unavailable evidence. Use after canary_brief or for an explicit market-regime question; use canary_stress for how that market state affects the held portfolio. Gamma is a conditional amplification/damping model; open interest does not identify dealer inventory or market direction. Read-only; no history or refresh controls.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `include_profiles` | boolean | no | Include large gamma profile arrays; false by default. Scalar measurements, thresholds, warnings and freshness are always retained. |
+
+## `canary_stress`
+
+Read the full current portfolio-stress assessment: margin, P&L and tape shocks, exposure, concentration, protection coverage, held-name and options risk, market indicators, and source health. Use after canary_brief or for an explicit portfolio-risk question; use canary_regime for the detailed broad-market dashboard. Preserves the same shared assessment used by the app. Missing inputs cannot become healthy zero values. Advisory and read-only; cannot preview or submit orders or change limits.
+
+*No parameters.*
+
 ## `canary_brief`
 
-Start here for the daemon's current desk and broad-market regime read: independent stress clusters, breadth coverage, modeled gamma response and expiry horizons, and observed 25-delta option skew. Preserve freshness, rankability, source warnings and unavailable values. Gamma models potential amplification or damping; open interest does not prove bullish/bearish intent or dealer inventory, and put-call skew is relative option pricing, not a forecast. Use canary_status to diagnose degraded sources and canary_edge for retrospective decision outcomes; drill into canary_positions or canary_account only when the brief points there. Read-only; never acknowledges the brief or writes to the journal.
+Start here for the daemon's current desk summary: regime stage and verdict, portfolio-stress summary, breadth coverage, modeled gamma response and expiry horizons, and observed 25-delta option skew. Preserve freshness, rankability, source warnings and unavailable values. Gamma models potential amplification or damping; open interest does not prove bullish/bearish intent or dealer inventory, and put-call skew is relative option pricing, not a forecast. Use canary_regime for all market indicators and confirmation details, canary_stress for full portfolio-risk evidence, canary_status to diagnose degraded sources and canary_edge for retrospective decision outcomes; drill into canary_positions or canary_account only when the brief points there. Read-only; never acknowledges the brief or writes to the journal.
 
 *No parameters.*
 

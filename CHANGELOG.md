@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented here. The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html), and release entries follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) categories (Added / Changed / Deprecated / Removed / Fixed / Security).
 
+## v3.4.0 — 2026-09-06 08:30 CEST
+
+### What's new
+
+- **Regime and portfolio Stress are back in the terminal and MCP.** `canary regime` shows all eight market indicators; `canary stress` shows margin, exposure, concentration, options, protection, and supporting risk evidence. Both support detailed human output and JSON, with matching read-only MCP tools. Brief remains the summary and points to these drill-downs.
+- **Edge explains the evidence behind a decision review.** The automatic review now includes decision coverage, comparisons of the same decisions across holding horizons, monthly consistency, concentration, completed exact-contract option positions, and available local protection provenance. These are historical observations, not trading forecasts or proof of skill.
+
+### Changed
+
+- **The app makes portfolio protection easier to read.** Stop-loss coverage distinguishes individual protection from whole-portfolio reductions, proposal reviews are simpler, daily P/L sits below the market quotes, and rule evaluations explain their evidence.
+- **Regime gamma describes local modeled response and expiry horizons.** Current-price exposure, zero-crossing depth, 0DTE and longer horizons, and 25-delta skew retain their coverage and quality limits; options positioning is descriptive and never a directional forecast.
+- **Restored drill-downs preserve the existing risk decisions.** Broker-write gates, trading limits, and freeze authority are unchanged. Retired Regime/Stress history and forced-refresh controls remain unavailable.
+
+### Fixed
+
+- **Edge no longer overstates realized option results or hides an incomplete execution price.** Missing broker fields remain explicit, and account P/L requires adequate equity history. (#36, #37)
+- **Regime breadth no longer manufactures annual highs or complete moving averages from insufficient history.** Invalid or incomplete observations remain unavailable. (#38)
+- **Regime gamma no longer calls a negative current-price exposure stabilizing.** Classification follows the measured local profile and preserves stale, partial, and unrankable evidence. (#39)
+- **Funding history includes both required months at month ends.** A failed monthly read cannot silently become a complete comparison.
+- **Read-only previews no longer offer protection mutations.** Deployment verification accepts the isolated read-only preview while rejecting non-read browser requests.
+
 ## v3.3.2 — 2026-08-27 22:09 CEST
 
 ### What's new

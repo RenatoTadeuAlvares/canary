@@ -7,7 +7,7 @@ Updated: 2026-09-05
 
 ## Contract
 
-Use the typed `canary` MCP tools for read-only brief, Edge review, account, positions,
+Use the typed `canary` MCP tools for read-only brief, detailed regime and portfolio stress, Edge review, account, positions,
 rulebook, named-symbol technical, proposal, opportunity, settings, trading,
 health, and order-status/history work. Use `canary ... --json` when MCP is
 unavailable, a CLI-only policy/reconciliation diagnostic is required, or the

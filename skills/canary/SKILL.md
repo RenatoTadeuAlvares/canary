@@ -1,13 +1,13 @@
 ---
 name: canary
 description: Use Canary through the local `canary` CLI for the daily brief,
-  account and position detail, historical Edge decision review, named-symbol
+  detailed regime and portfolio stress, account and position detail, historical Edge decision review, named-symbol
   technical analysis, desk policy and
   rules, protection proposals, option-exercise opportunities, runtime settings,
   and order status or history. Read first; broker writes require an explicit
   transaction-specific request and the gated CLI path.
 allowed-tools: Bash(canary account*) Bash(canary positions*) Bash(canary technical*)
-  Bash(canary brief*) Bash(canary edge*) Bash(canary rules*) Bash(canary proposals status*) Bash(canary proposals list*) Bash(canary proposals refresh*) Bash(canary opportunities status*) Bash(canary opportunities list*) Bash(canary opportunities refresh*) Bash(canary settings show*) Bash(canary policy show*) Bash(canary recon show*) Bash(canary trading status*) Bash(canary orders open*) Bash(canary orders history*) Bash(canary order status*)
+  Bash(canary regime*) Bash(canary stress*) Bash(canary brief*) Bash(canary edge*) Bash(canary rules*) Bash(canary proposals status*) Bash(canary proposals list*) Bash(canary proposals refresh*) Bash(canary opportunities status*) Bash(canary opportunities list*) Bash(canary opportunities refresh*) Bash(canary settings show*) Bash(canary policy show*) Bash(canary recon show*) Bash(canary trading status*) Bash(canary orders open*) Bash(canary orders history*) Bash(canary order status*)
   Bash(canary status*) Bash(canary version*)
 ---
 
@@ -32,6 +32,23 @@ names.
 For an explicitly named stock or ETF, `canary technical SYMBOL --json` returns
 trend, relative strength, ATR, and liquidity evidence. It is analysis, not an
 order-entry path.
+
+## Market regime and portfolio stress
+
+Use `canary regime --json` / `canary_regime` for all eight broad-market
+indicators, independent clusters, confirmation eligibility, source health,
+and gamma horizons/skew. `canary regime --explain` adds served thresholds
+and source detail to the human dashboard; `--json --profiles` includes large
+gamma profile arrays (MCP: `include_profiles=true`).
+
+Use `canary stress --json` / `canary_stress` for the full portfolio assessment,
+including margin, P&L and tape shocks, exposures, concentration, protection,
+options risk, evidence rows, and source health. `--details` adds market rows
+and source detail to the human output. This is the successor to the former
+portfolio-canary command. Both reads use the existing app contracts and shared
+evaluator. Brief remains a summary; its regime and stress rows are not the full
+assessments. Retired Regime/Stress history and force-refresh controls are not
+restored. Gamma is a conditional response model, not a directional forecast.
 
 ## Historical decision review
 
@@ -83,6 +100,8 @@ read-only QA.
 
 ```sh
 canary brief --json
+canary regime --json
+canary stress --json
 canary edge --json
 canary account --json
 canary positions --view risk --json

@@ -51,6 +51,8 @@ run_shell_case() {
 # Retained read-only surfaces; free-form preview returned 2026-08-14 as an
 # allow (tokenized draft + WhatIf, never transmits).
 run_cli_case read-status canary allow status --json
+run_cli_case read-regime canary allow regime --json
+run_cli_case read-stress canary allow stress --json
 run_cli_case order-preview canary allow order preview buy AAPL 1 --limit 100 --json
 run_cli_case order-status canary allow order status ORDER_ID --json
 run_cli_case orders-open canary allow orders open --json

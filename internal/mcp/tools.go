@@ -10,6 +10,7 @@ import (
 
 	"github.com/osauer/canary/v2/internal/dial"
 	"github.com/osauer/canary/v2/internal/rpc"
+	"github.com/osauer/canary/v2/internal/stress"
 )
 
 // Tool is the registered shape of an MCP tool exposed by `canary mcp`.
@@ -238,10 +239,49 @@ var Tools = []Tool{
 			return json.Marshal(res)
 		},
 	},
+
+	{
+		Name: "canary_regime", Title: "Canary Market Regime",
+		Description:  "Read the detailed broad-market regime: all eight indicators, independent clusters, confirmation eligibility, gamma horizons and skew, source health, and stale or unavailable evidence. Use after canary_brief or for an explicit market-regime question; use canary_stress for how that market state affects the held portfolio. Gamma is a conditional amplification/damping model; open interest does not identify dealer inventory or market direction. Read-only; no history or refresh controls.",
+		JSONSchema:   schemaObject(map[string]json.RawMessage{"include_profiles": json.RawMessage(`{"type":"boolean","description":"Include large gamma profile arrays; false by default. Scalar measurements, thresholds, warnings and freshness are always retained."}`)}, nil),
+		ReadOnlyHint: new(true), RPCMethods: []string{rpc.MethodRegimeSnapshot},
+		Handler: func(ctx context.Context, conn *dial.Conn, args json.RawMessage) (json.RawMessage, error) {
+			var in struct {
+				IncludeProfiles bool `json:"include_profiles"`
+			}
+			if err := unmarshalArgs(args, &in); err != nil {
+				return nil, err
+			}
+			var res rpc.RegimeSnapshotResult
+			if err := conn.Call(ctx, rpc.MethodRegimeSnapshot, rpc.RegimeSnapshotParams{}, &res); err != nil {
+				return nil, err
+			}
+			if !in.IncludeProfiles {
+				rpc.StripRegimeGammaProfiles(&res)
+			}
+			return json.Marshal(res)
+		},
+	},
+	{
+		Name: "canary_stress", Title: "Canary Portfolio Stress",
+		Description: "Read the full current portfolio-stress assessment: margin, P&L and tape shocks, exposure, concentration, protection coverage, held-name and options risk, market indicators, and source health. Use after canary_brief or for an explicit portfolio-risk question; use canary_regime for the detailed broad-market dashboard. Preserves the same shared assessment used by the app. Missing inputs cannot become healthy zero values. Advisory and read-only; cannot preview or submit orders or change limits.",
+		JSONSchema:  schemaObject(nil, nil), ReadOnlyHint: new(true), RPCMethods: stress.FetchMethods(),
+		Handler: func(ctx context.Context, conn *dial.Conn, args json.RawMessage) (json.RawMessage, error) {
+			var in struct{}
+			if err := unmarshalArgs(args, &in); err != nil {
+				return nil, err
+			}
+			res, err := stress.FetchStress(ctx, conn)
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(res)
+		},
+	},
 	{
 		Name:         "canary_brief",
 		Title:        "Canary Daily Brief",
-		Description:  "Start here for the daemon's current desk and broad-market regime read: independent stress clusters, breadth coverage, modeled gamma response and expiry horizons, and observed 25-delta option skew. Preserve freshness, rankability, source warnings and unavailable values. Gamma models potential amplification or damping; open interest does not prove bullish/bearish intent or dealer inventory, and put-call skew is relative option pricing, not a forecast. Use canary_status to diagnose degraded sources and canary_edge for retrospective decision outcomes; drill into canary_positions or canary_account only when the brief points there. Read-only; never acknowledges the brief or writes to the journal.",
+		Description:  "Start here for the daemon's current desk summary: regime stage and verdict, portfolio-stress summary, breadth coverage, modeled gamma response and expiry horizons, and observed 25-delta option skew. Preserve freshness, rankability, source warnings and unavailable values. Gamma models potential amplification or damping; open interest does not prove bullish/bearish intent or dealer inventory, and put-call skew is relative option pricing, not a forecast. Use canary_regime for all market indicators and confirmation details, canary_stress for full portfolio-risk evidence, canary_status to diagnose degraded sources and canary_edge for retrospective decision outcomes; drill into canary_positions or canary_account only when the brief points there. Read-only; never acknowledges the brief or writes to the journal.",
 		JSONSchema:   schemaObject(nil, nil),
 		ReadOnlyHint: new(true),
 		RPCMethods:   []string{rpc.MethodBriefSnapshot},

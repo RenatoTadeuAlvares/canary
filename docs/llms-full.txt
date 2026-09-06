@@ -1,6 +1,6 @@
 # Canary full context
 
-Updated: 2026-08-27
+Updated: 2026-09-06
 
 Canary is a local Interactive Brokers risk desk built as a Go daemon, a
 shell CLI, a read-only stdio MCP server, a Claude Desktop MCPB, a Claude Code
@@ -63,16 +63,18 @@ Run the server with `canary mcp`. It exposes these read-only tools:
 - `canary_positions`: held positions and exposure with account authority.
 - `canary_strategies`: current held-option strategy grouping; no order actions.
 - `canary_technical`: daily technical evidence for explicitly named symbols.
-- `canary_brief`: current daemon-composed desk brief and Action Queue.
+- `canary_regime`: all eight market indicators, cluster confirmation, and source health.
+- `canary_stress`: full portfolio-stress assessment with risk evidence and source health.
+- `canary_brief`: current daemon-composed desk summary and Action Queue.
 - `canary_reporting`: redacted broker-reporting setup and evidence status.
 - `canary_edge`: retrospective stock/ETF decision impact and separate option actuals.
 - `canary_rules`: ranked rulebook findings and explicit unknown inputs.
 - `canary_proposals`: read-only close/reduce protection candidates.
 - `canary_opportunities`: read-only held-option exercise candidates.
 
-Calendar, quote, market-event, breadth, gamma, regime, and stress engines remain
-internal daemon sensors. Their relevant results flow through the brief, Edge,
-rules, proposals, opportunities, and app; they are not separate v3 MCP tools. Policy
+Calendar, quote, market-event, breadth, and gamma engines remain internal
+daemon inputs. Since v3.4, Regime and Stress have detailed CLI/MCP reads again,
+while Brief remains the summary. Regime/Stress history is still retired. Policy
 and reconciliation reads remain CLI-only governance surfaces.
 
 ## CLI workflow
@@ -85,6 +87,8 @@ canary account
 canary positions --by underlying
 canary technical AAPL,MSFT
 canary brief
+canary regime --explain
+canary stress --details
 canary rules
 canary policy show
 canary recon show

@@ -272,9 +272,15 @@ this authority health and must not present a stale publication as current.
 
 ```sh
 canary status --json
-canary brief --json
+canary regime --json
+canary stress --json
 canary rules --json
 ```
+
+Since v3.4, `canary regime --explain` and MCP `canary_regime` restore the
+indicator drill-down. JSON retains measurements, thresholds, eligibility and
+source health; gamma profile arrays require `--profiles` or MCP
+`include_profiles=true`. History and forced refresh remain retired.
 
 Check Regime authority health, `as_of`, lifecycle readiness, each cluster's
 `source_health`, row freshness and eligibility, then `governors`. A green row
@@ -331,13 +337,16 @@ evidence may stay visible, but the input gap remains the headline condition.
 ### Safe check
 
 ```sh
-canary brief --json
+canary regime --json
+canary stress --json
 canary rules --json
 ```
 
-Read the brief's input health and source warnings before its summary, then
-compare source timestamps, embedded market lifecycle, and held stress. Stress
-remains an internal daemon sensor in v3, not a standalone CLI or MCP command.
+Read Stress input health and source warnings before its summary, then compare
+source timestamps, embedded market lifecycle, and held stress. Since v3.4,
+`canary stress` and MCP `canary_stress` expose the complete assessment again;
+`canary brief` retains the summary. `canary stress --details` shows market rows
+and source health alongside the risk evidence.
 
 ## Rulebook
 

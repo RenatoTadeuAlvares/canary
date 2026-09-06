@@ -213,6 +213,8 @@ func init() {
 		{"positions", "List open positions (stocks + options)", "canary positions [--symbol SYM] [--type stk|opt] [--sort alpha|pnl|value] [--quotes] [--by underlying] [--watch --rate 1s] [--json]", runPositions},
 		{"strategies", "Group option legs and close or reduce them as one guaranteed combo", "canary strategies list [--json] | canary strategies close ID REVISION [--limit PRICE] [--submit] | canary strategies reduce ID REVISION --units N [--limit PRICE] [--submit]", runStrategies},
 		{"technical", "Trend, relative strength, ATR, and liquidity from daily bars", "canary technical SYM[,SYM...] [--benchmark SPY] [--market us|de] [--json]", runTechnical},
+		{"regime", "Detailed broad-market regime across volatility, credit, funding, FX, gamma, and breadth", "canary regime [--explain] [--json [--profiles]]", runRegime},
+		{"stress", "Portfolio stress with margin, exposure, concentration, options, protection, and source evidence", "canary stress [--details] [--json]", runStress},
 		{"brief", "Combined post- and pre-trade operator brief with disclosed source degradation", "canary brief [--json]", runBrief},
 		{"edge", "Automatic decision review with coverage, matched horizons, repeatability, and option position cycles", "canary edge [--window 90d|365d] [--horizon 1|5|20] [--limit N] [--change ID] [--option ID] [--json]", runEdge},
 		{"rules", "Advisory 14-rule daily trading checklist, hardest breach first", "canary rules [--all] [--symbol SYM] [--json] | canary rules history [--since YYYY-MM-DD|RFC3339] [--until YYYY-MM-DD|RFC3339] [--rule ID] [--limit N] [--json]", runRules},

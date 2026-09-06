@@ -1,6 +1,6 @@
 # Regime dashboard contract
 
-Updated: 2026-09-05
+Updated: 2026-09-06
 
 The daemon's Regime engine classifies the broad-market stress lifecycle as `quiet`,
 `early_warning`, `confirmed_stress`, `panic`, `stabilization`, `opportunity`,
@@ -12,8 +12,12 @@ confirming each other, or is the market still broadly calm?
 
 The daemon's Stress engine may consume this output, but Stress owns account and
 portfolio action. A portfolio concentration problem can be real even while the
-broad market regime is calm. In v3 these are internal sensors surfaced through
-the daily brief, rules, and app rather than standalone CLI or MCP commands.
+broad market regime is calm. Since v3.4, `canary regime [--explain] [--json]`
+and `canary stress [--details] [--json]` restore the detailed reads, alongside
+MCP `canary_regime` and `canary_stress`. Brief keeps the summary; the app keeps
+its existing detailed projections. Regime JSON omits large gamma profile arrays
+unless `--profiles` (MCP `include_profiles=true`) is requested. Regime/Stress
+history and forced-refresh controls remain retired.
 
 ## Output shape
 

@@ -2,7 +2,7 @@
   "serverInfo": {
     "name": "canary",
     "title": "Canary MCP Server",
-    "version": "3.3.2",
+    "version": "3.4.0",
     "description": "Canary's local read-only MCP server for Interactive Brokers account, market, broker-reporting, retrospective Edge, and advisory risk context through IB Gateway or TWS.",
     "homepage": "https://osauer.dev/canary/",
     "repository": "https://github.com/osauer/canary",
@@ -207,8 +207,29 @@
       }
     },
     {
+      "name": "canary_regime",
+      "description": "Read the detailed broad-market regime: all eight indicators, independent clusters, confirmation eligibility, gamma horizons and skew, source health, and stale or unavailable evidence. Use after canary_brief or for an explicit market-regime question; use canary_stress for how that market state affects the held portfolio. Gamma is a conditional amplification/damping model; open interest does not identify dealer inventory or market direction. Read-only; no history or refresh controls.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "include_profiles": {
+            "type": "boolean",
+            "description": "Include large gamma profile arrays; false by default. Scalar measurements, thresholds, warnings and freshness are always retained."
+          }
+        }
+      }
+    },
+    {
+      "name": "canary_stress",
+      "description": "Read the full current portfolio-stress assessment: margin, P\u0026L and tape shocks, exposure, concentration, protection coverage, held-name and options risk, market indicators, and source health. Use after canary_brief or for an explicit portfolio-risk question; use canary_regime for the detailed broad-market dashboard. Preserves the same shared assessment used by the app. Missing inputs cannot become healthy zero values. Advisory and read-only; cannot preview or submit orders or change limits.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
       "name": "canary_brief",
-      "description": "Read Canary's current daily brief exactly as the daemon composed it. Use when the user asks what changed since the last close, what matters today, which inputs are missing or stale, or what still needs attention before trading. This is the same typed brief used by Canary's terminal and paired app; it does not rebuild the answer from separate account, position, regime, or rulebook calls. Read-only: it never acknowledges the brief, records a sign-off, advances a review clock, writes to the journal, or changes settings. NOT for drilling into one holding or account total; use `canary_positions` or `canary_account` after the brief points to that detail.",
+      "description": "Read Canary's current daily brief exactly as the daemon composed it. Use when the user asks what changed since the last close, what matters today, which inputs are missing or stale, or what still needs attention before trading. This is the same typed brief used by Canary's terminal and paired app; it does not rebuild the answer from separate account, position, regime, or rulebook calls. Read-only: it never acknowledges the brief, records a sign-off, advances a review clock, writes to the journal, or changes settings. For market indicators use `canary_regime`; for full portfolio-risk evidence use `canary_stress`. NOT for drilling into one holding or account total; use `canary_positions` or `canary_account` after the brief points to that detail.",
       "inputSchema": {
         "type": "object",
         "properties": {}

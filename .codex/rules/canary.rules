@@ -6,9 +6,9 @@
 # earlier, best-effort rejection for command shapes prefix rules cannot express.
 
 prefix_rule(
-    pattern = ["canary", ["status", "version", "account", "positions", "technical", "brief", "rules"]],
+    pattern = ["canary", ["status", "version", "account", "positions", "technical", "brief", "regime", "stress", "rules"]],
     decision = "allow",
-    justification = "Retained read-only Canary account, position, technical, brief, and rulebook commands are routine project work.",
+    justification = "Retained read-only Canary account, position, technical, regime, stress, brief, and rulebook commands are routine project work.",
     match = [
         "canary status --json",
         "canary technical AAPL --json",

@@ -85,7 +85,7 @@ func render(specs []cli.CommandSpec) string {
 	out.WriteString("Standard builds have no broker-write path compiled in at all. The separate trading build adds one, and it still requires a verified gateway session, a submit-eligible preview token where one applies, a local journal entry, daemon authorization, and `trading.freeze` set to false. ")
 	out.WriteString("Nothing on this page grants any of that.\n\n")
 
-	out.WriteString("The group column is the heading a command appears under in `canary --help`: Desk is the account, its positions, orders and risk; Markets is named-symbol technical evidence; System is running Canary itself. ")
+	out.WriteString("The group column is the heading a command appears under in `canary --help`: Desk is the account, its positions, orders and risk; Markets is broad-market regime and named-symbol technical evidence; System is running Canary itself. ")
 	out.WriteString("It is a reading aid for a long command list and says nothing about what a command may do — that is the guard.\n\n")
 
 	out.WriteString("## Command summary\n\n")

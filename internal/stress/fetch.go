@@ -130,3 +130,22 @@ func stressMarketEventSymbols(pos rpc.PositionsResult) []string {
 	slices.Sort(out)
 	return out
 }
+
+// FetchMethods lists the sequential daemon reads, including the optional P&L
+// retry, so adapter deadlines cover the complete shared assessment.
+func FetchMethods() []string {
+	return []string{rpc.MethodAccountSummary, rpc.MethodPositionsList, rpc.MethodRegimeSnapshot, rpc.MethodMarketEventsSnapshot, rpc.MethodAccountSummary}
+}
+
+// FetchTimeout budgets every sequential read with positive transport headroom.
+func FetchTimeout(headroom time.Duration) time.Duration {
+	var total time.Duration
+	for _, method := range FetchMethods() {
+		timing, ok := rpc.LookupMethodTiming(method)
+		if !ok {
+			panic("stress: missing method timing: " + method)
+		}
+		total += timing.ClientTimeout(headroom)
+	}
+	return total
+}
