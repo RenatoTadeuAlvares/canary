@@ -162,10 +162,11 @@ func composeBriefNarrative(res *rpc.BriefResult) *rpc.BriefNarrative {
 	}
 	topics := briefTopics(res)
 	return &rpc.BriefNarrative{
-		Lead:   briefNarrativeLead(res, topics),
-		Review: briefNarrativeReview(res.Review, res.Ready.Session),
-		Ready:  briefNarrativeReady(res.Ready),
-		Coda:   briefNarrativeCoda(topics),
+		Overview: composeBriefOverview(res, topics),
+		Lead:     briefNarrativeLead(res, topics),
+		Review:   briefNarrativeReview(res.Review, res.Ready.Session),
+		Ready:    briefNarrativeReady(res.Ready),
+		Coda:     briefNarrativeCoda(topics),
 	}
 }
 
@@ -319,20 +320,20 @@ func briefNarrativeCoda(topics []briefTopic) []rpc.BriefRun {
 	posture := briefPostureFlagged(topics)
 	switch {
 	case len(flagged) > 0:
-		p.text("Owed before the bell: ")
+		p.text("Needs review: ")
 		for i, topic := range flagged {
 			if i > 0 {
 				p.text(", ")
 			}
 			p.tintedTopic(topic.role, topic.label, topic.slug())
 		}
-		p.text(". Everything else holds.")
+		p.text(".")
 	case posture:
-		p.text("Nothing owed before the bell beyond the stress reading above.")
+		p.text("Review the stress reading above.")
 	case len(unread) > 0:
-		p.text("Nothing on the desk needs a decision, but " + briefCountPhrase(len(unread), "input", "inputs") + " could not be read: unknown is not clean.")
+		p.text("No additional findings are reported, but " + briefCountPhrase(len(unread), "input", "inputs") + " could not be read: unknown is not clean.")
 	default:
-		p.text("Nothing owed before the bell.")
+		p.text("No additional findings need review.")
 	}
 	if (len(flagged) > 0 || posture) && len(unread) > 0 {
 		p.sentence()
@@ -876,13 +877,13 @@ func briefReadyProposalsSentence(p *briefProse, row rpc.BriefReadyProposalsRow) 
 		p.text("The protection proposal snapshot is unavailable, so staged work cannot be stated.")
 	case row.Actionable > 0:
 		p.tinted(role, briefUpperFirst(briefCountPhrase(row.Actionable, "protection proposal", "protection proposals"))+" "+
-			briefVerb(row.Actionable, "is", "are")+" ready to act")
+			briefVerb(row.Actionable, "is", "are")+" staged for review")
 		if row.Blocked > 0 {
 			p.tinted(role, ", with "+briefCountPhrase(row.Blocked, "more blocked", "more blocked"))
 		}
 		p.tinted(role, ".")
 	case row.Blocked > 0:
-		p.text("No protection proposal is ready to act; " + briefCountPhrase(row.Blocked, "is blocked", "are blocked") + ".")
+		p.text("No protection proposal is unblocked; " + briefCountPhrase(row.Blocked, "is blocked", "are blocked") + ".")
 	default:
 		p.text("No protection proposals are staged.")
 	}

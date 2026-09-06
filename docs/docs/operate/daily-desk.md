@@ -1,6 +1,6 @@
 # The daily desk
 
-Updated: 2026-08-10 08:25 CEST
+Updated: 2026-09-06
 
 The recurring loop, in the order a trading day runs it. Each command is followed by the decision it supports. [Your first session](../start/first-session.md) explains what these screens contain; this page assumes you already know and only tells you when to look.
 
@@ -13,9 +13,21 @@ canary brief
 
 `canary status` answers one question before anything else matters: which broker session am I attached to. It exits 1 when the gateway is not connected, so it also works as a guard in a script.
 
-`canary brief` is the assembled read, and it arrives as a briefing rather than a table. A lead states the desk's posture and how many rows need a decision. Then two movements: **Review** covers the desk since the last regular close (session P&L and attribution by underlying — the broker's running daily values, which off-session keep moving on extended and overnight marks — the last completed session's Daily P&L as captured at the official close, shown as not captured when the daemon was not watching that close, current policy adherence, proposals offered against acted, overrides used, capital events, the reconciliation clock, and working orders) and **Ready** covers today (regime, breadth, dealer gamma, stress, session state, held-name events, capital tier, drawdown latch, premium at risk, index-put theta per day, staged protection work, policy drift, and the automated monthly process state). A closing line says what is owed before the bell.
+`canary brief` opens with assessment completeness and the served portfolio-risk
+reading. **Needs review** keeps reported findings visible even when other inputs
+are missing. **Context** gives available market observations with their dates.
+**Coverage gaps** groups unavailable and degraded checks by scope, without
+pretending that every missing check has the same cause.
 
-The daemon composes that prose from the same typed rows the JSON carries, and every surface renders it verbatim — the terminal writes no sentence of its own. Clean topics fold into one summary clause, the text grows only where something is flagged, and a source that could not be read is named rather than skipped. On a colour-capable terminal a watch-class clause reads amber and an act-class clause red; figures stay in the terminal's own ink. `CANARY_COLOR=never`, `NO_COLOR`, and any pipe or redirect give the same sentences in plain text.
+`canary brief --details` contains the full **Review** since the last regular
+close and **Ready** evidence for the next session, including per-input diagnostics,
+retained Edge context, and routine process evidence. The app uses the same
+compact overview with expandable full details. Observation times remain explicit;
+the brief's generation time is not the observation time of its inputs.
+
+The daemon authors the overview and full narrative from typed rows. Watch and
+act roles retain their served meaning; missing data does not become a risk
+verdict. Plain-text pipes preserve the same reading order without colour.
 
 Behind the prose the row vocabulary is unchanged, and it is what the composition is made of:
 
@@ -26,9 +38,15 @@ Behind the prose the row vocabulary is unchanged, and it is what the composition
 | `degraded` | Input quality only. Some evidence behind the row is stale or partial. | Decide whether the decision you were about to make depends on that input. |
 | `unavailable` | No usable value for that row. | Do not read absence as a passing result. |
 
-The separation is deliberate: `degraded` and `unavailable` never signal a risk condition, and `attention` never signals a data problem. The prose names every input it could not read, and a **Degraded inputs** list under the briefing gives each of those rows its own reason, so a cold source is always traceable to what went cold. A brief whose inputs all read prints no such list. Stop and fix when the cold source is one the next decision rests on. Trade around it when it is not. [Sensors](../understand/sensors.md) covers freshness states and the safe check for each source.
+Coverage and risk findings can coexist: an attention row may also contain unknown
+checks. Disabled or inapplicable rules are not missing evidence. Full per-row
+reasons remain in `--details`; `canary status` diagnoses runtime connectivity.
+[Sensors](../understand/sensors.md) explains freshness and source cadence.
 
-When the daemon serves no narrative — an older daemon, or a payload whose movements did not compose — the brief falls back to the original row table: one line per row with its status word, and its reason on the line below it. `canary brief --json` is unchanged either way and carries both the typed rows and the composed prose.
+An older daemon without the overview retains the previous full render.
+`canary brief --json` and MCP retain the typed rows and narrative, with the
+additive `narrative.overview` presentation. Presentation does not change the
+row-derived brief fingerprint.
 
 ## Pure-read process evidence
 
@@ -38,10 +56,16 @@ Routine clean evidence is machine work. A monthly pulse becomes complete automat
 
 ## Market context
 
-Regime, breadth, dealer gamma, stress, market-session, and held-name event
-context arrive through the Ready movement of `canary brief`, the matching app
-Monitor windows, and rulebook evidence. They are daemon-owned sensors rather
-than separate public v3 CLI or MCP commands.
+Use `canary regime` for all eight broad-market indicator readings and
+`canary stress` for portfolio-risk findings. `regime --explain` adds observation
+times, thresholds, calibration status, and independent source diagnostics.
+`stress --details` includes quiet evidence rows and operational diagnostics.
+Unavailable Stress keeps a nonzero exit status. JSON and the matching read-only
+MCP tools retain full typed evidence.
+
+A stale Regime snapshot labels readings as recorded context; a retained green
+band is not a current rating. The default view keeps thresholds and long source
+errors out of the indicator list without discarding them from detail.
 
 One rule about the stress read is worth carrying into every session: account-only stress is evidence, not a trigger. A zero margin cushion with no confirmed market pressure renders its evidence row and still returns `stand_down`. The `defend` action needs defensive direction at act severity, confirmed market stress, high portfolio fit, and healthy inputs together.
 
@@ -80,7 +104,7 @@ With no subcommand this lists the daemon's current protection proposals; the rea
 canary brief
 ```
 
-The Review movement is the post-trade read. It is the same pure snapshot before and after the close; the official close capture and retained broker evidence determine what it can state, not a render-time mode or acknowledgement.
+The Review section of `canary brief --details` is the post-trade read. It is the same pure snapshot before and after the close; the official close capture and retained broker evidence determine what it can state, not a render-time mode or acknowledgement.
 
 Reconciliation runs on its own clock rather than yours. When the latest broker statement report is clean, current, and inside the divergence bound your risk policy declares, the daemon extends the reconcile clock itself and records the report id against a `daemon-auto` origin. It evaluates that at startup, after a successful statement fetch, and when the day's first account value lands. Nothing clean asks for your signature. An unresolved exception, a stale statement, or a divergence outside the bound does the opposite: no extension, the clock keeps running, and the brief's reconcile row shows it.
 

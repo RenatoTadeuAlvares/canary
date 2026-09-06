@@ -256,6 +256,12 @@ async function runRound4SyntheticSmoke() {
         as_of: now,
         brief_fingerprint: "sha256:synthetic-render",
         narrative: {
+          overview: {
+            assessment: [{ text: "Assessment incomplete. Portfolio risk: confirm inputs." }],
+            attention: [{ runs: [{ text: "Capital", role: "watch", topic: "capital" }, { text: " · warn tier · shadow enforcement · observation time unavailable" }] }],
+            context: [{ runs: [{ text: "Breadth · observed 17 Aug 16:00 UTC" }] }],
+            coverage: [{ runs: [{ text: "Portfolio · unavailable: session P/L, attribution" }] }, { runs: [{ text: "Market · degraded: regime, dealer gamma" }] }],
+          },
           lead: [{ text: "Synthetic desk ready.", role: "figure" }],
           review: [{ runs: [{ text: "Review synthetic process evidence.", role: "watch" }] }],
           ready: [{ runs: [{ text: "Act only on served synthetic evidence.", role: "act" }] }],
@@ -652,6 +658,14 @@ async function runRound4SyntheticSmoke() {
       accountText: document.getElementById("accountLabel")?.textContent || "",
       sessionBridge: document.querySelector("#briefSections .pd-placard")?.textContent?.trim() || "",
     }));
+    await page.locator("#briefDisclosure > summary").click();
+    const fullBrief = page.locator(".brief-full-details");
+    if (await fullBrief.getAttribute("open") !== null) throw new Error("Brief details did not start collapsed");
+    if (!briefView.text.includes("Assessment incomplete.") || briefView.sessionBridge !== "Needs review") throw new Error("Brief overview lost its priority order");
+    if (args["brief-screenshot"]) await page.locator("#briefPanel").screenshot({ path: args["brief-screenshot"] });
+    await fullBrief.locator("summary").click();
+    await fullBrief.locator(".brief-section").first().waitFor({ state: "visible" });
+    await fullBrief.locator("summary").click();
     await page.setViewportSize({ width: 591, height: 844 });
     await page.locator("#tabOrders").click();
     await page.waitForFunction(() => document.getElementById("ordersOpenCount")?.textContent === "1 open", { timeout: 5000 });
@@ -721,7 +735,7 @@ async function runRound4SyntheticSmoke() {
     if (edgeOptionView.title !== "APEX · Closing episode" || !/Broker realized P\/L\+(?:US)?\$90\.00/.test(edgeOptionView.summary) || edgeOptionView.legCount !== 2 || !edgeOptionView.legs.includes("qty 1") || !/at (?:US)?\$3\.00/.test(edgeOptionView.legs) || !/Costs \+(?:US)?\$1\.00/.test(edgeOptionView.legs) || edgeOptionView.expanded !== "true" || edgeOptionView.horizontalOverflow) {
       throw new Error(`synthetic Edge option trail failed: ${JSON.stringify(edgeOptionView)}`);
     }
-    if (!briefView.narrative || !briefView.text.includes("Synthetic desk ready.") || !briefView.text.includes("No account-derived data was loaded.") || briefView.accountText !== "Account unresolved" || !briefView.sessionBridge.startsWith("Monday's close → next open")) throw new Error(`synthetic Brief state failed: ${JSON.stringify(briefView)}`);
+    if (!briefView.narrative || !briefView.text.includes("Assessment incomplete.") || !briefView.text.includes("observation time unavailable") || briefView.accountText !== "Account unresolved" || briefView.sessionBridge !== "Needs review") throw new Error(`synthetic Brief state failed: ${JSON.stringify(briefView)}`);
     if (!ordersView.active || ordersView.count !== "1 open" || !ordersView.text.includes("SYN")) throw new Error(`synthetic Orders state failed: ${JSON.stringify(ordersView)}`);
     if (!positionsView.active || !positionsView.underlyingsExpanded || positionsView.reductionRoutes !== 2 || !positionsView.strategiesSeated || !positionsView.strategiesCollapsed || !positionsView.performanceFirst || positionsView.sortOptions !== 5) throw new Error(`synthetic Positions state failed: ${JSON.stringify(positionsView)}`);
     if (strategyBefore.count !== "1 group" || !strategyBefore.text.includes("SYN · Vertical spread") || !strategyBefore.text.includes("2 units") || strategyBefore.previewButtons !== 1) throw new Error(`synthetic strategy group failed: ${JSON.stringify(strategyBefore)}`);
@@ -2632,6 +2646,7 @@ async function assertBriefNarrative(page) {
     const brief = body?.snapshot?.brief || {};
     return {
       narrative: Boolean(brief.narrative),
+      overview: brief.narrative?.overview || null,
       review: brief.review || {},
     };
   });
@@ -2664,6 +2679,18 @@ async function assertBriefNarrative(page) {
     await page.locator("#tabMonitor").click();
     await page.waitForSelector("#dashboard:not([hidden])", { timeout: 5000 });
     return { mode: rendered.mode, headings: rendered.sectionHeadings };
+  }
+
+  if (served.overview) {
+    for (const [key, title] of [["attention", "Needs review"], ["context", "Context"], ["coverage", "Coverage gaps"]]) {
+      if (served.overview[key]?.length && !rendered.placards.includes(title)) throw new Error(`Brief overview missing ${title}`);
+    }
+    const details = page.locator(".brief-full-details");
+    if (await details.getAttribute("open") !== null) throw new Error("Full brief should start collapsed");
+    await details.locator("summary").click();
+    await details.locator(".brief-section").first().waitFor({ state: "visible" });
+    await details.locator("summary").click();
+    return { mode: "overview", headings: rendered.placards, expanded_details: true };
   }
 
   if (!/^(?:[A-Z][a-z]+'s|Last) close → next open/.test(rendered.placards[0] || "")) {

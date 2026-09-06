@@ -48,12 +48,17 @@ exposure.
 canary brief
 ```
 
-Review covers what changed since the last regular close. Ready covers the next
-session: market-risk posture, portfolio fit, policy state, current protection
-work, and any source that could not be read. Quotes, calendars, breadth, gamma,
-regime, stress, earnings, borrow, and halt inputs are daemon-owned sensors in
-v3; they feed this assembled surface rather than returning as separate public
-CLI commands.
+The default view leads with assessment completeness, then findings needing
+review, dated context, and grouped coverage gaps. A missing observation time is
+explicit; a retained finding does not become current merely because the brief
+was generated now.
+
+Use `canary brief --details` for the full Review and Ready evidence and source
+diagnostics. The app offers the same overview with expandable details.
+`canary regime --explain` opens all eight market indicators, their observation
+times, thresholds, and independent source failures. `canary stress --details`
+opens portfolio-risk evidence and diagnostics. JSON and MCP retain the complete
+typed evidence; the compact human view does not change risk decisions.
 
 ## 4. Inspect the rulebook
 

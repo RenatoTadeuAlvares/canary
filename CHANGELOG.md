@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here. The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html), and release entries follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) categories (Added / Changed / Deprecated / Removed / Fixed / Security).
 
+## v3.4.1 — 2026-09-06 10:00 CEST
+
+### What's new
+
+- **Brief puts assessment, findings, and coverage first.** The terminal and app share a compact overview with dated context. Use `canary brief --details` or expand the app's full brief for supporting evidence and source diagnostics.
+
+### Changed
+
+- **Regime and Stress are easier to scan.** Readings wrap to terminal width, recorded Regime evidence is qualified, and Stress separates risk findings from missing inputs. Detailed thresholds and transport errors remain available explicitly.
+- **Risk decisions and broker-write authority are unchanged.** JSON and MCP retain full evidence, including unavailable values and source quality.
+
+### Fixed
+
+- **Brief no longer says everything else holds when checks are incomplete, and stale Regime bands no longer look current.** (#40)
+
 ## v3.4.0 — 2026-09-06 08:30 CEST
 
 ### What's new

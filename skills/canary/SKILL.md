@@ -20,6 +20,9 @@ names.
 ## Default flow
 
 1. Run `canary brief --json` for the combined post-trade and pre-trade report.
+   The human default prioritizes assessment, findings, context, and coverage;
+   `canary brief --details` retains the full narrative and input diagnostics.
+   `narrative.overview` is daemon-authored presentation, not a new risk verdict.
 2. If the brief points to account or holdings detail, run `canary account
    --json` or `canary positions --json`.
 3. If it points to policy adherence, run `canary rules --json` or `canary

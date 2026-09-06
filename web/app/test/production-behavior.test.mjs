@@ -1717,3 +1717,37 @@ test("Regime option context preserves quality, horizon differences and safe pros
   const retained = stress.regimeGammaDetails([{ underlying: "SPX", rankability: "rankable" }], { degraded: true, status: "stale" });
   assert.match(retained[0].textContent, /Last-known SPX.*Retained observation; regime authority stale/);
 });
+
+test("Brief overview preserves served priority, privacy, coverage and expandable evidence", () => {
+  reset();
+  state.authenticated = true;
+  state.accountValueVisible = false;
+  state.snapshot = { brief: {
+    narrative: {
+      lead: [{ text: "Full explanation" }],
+      overview: {
+        assessment: [{ text: "Assessment incomplete." }],
+        attention: [{ runs: [{ text: "Capital", role: "watch", topic: "capital" }, { text: " secret amount", account_sensitive: true }] }],
+        context: [{ runs: [{ text: "Breadth observed yesterday <img src=x>" }] }],
+        coverage: [{ runs: [{ text: "Portfolio unavailable; VVIX source degraded" }] }],
+      },
+    },
+    review: { rules: { status: "degraded", unknown: 1 } },
+    ready: { market_events: [{ kind: "halt", status: "ok", count: 0 }] },
+  }, sources: { positions: { error: "positions unavailable", state: "unavailable" } } };
+  brief.renderBriefCard(state.snapshot);
+  const sections = dom.element("briefSections");
+  assert.deepEqual(byClass(sections, "pd-placard").map(n => n.textContent), ["Needs review", "Context", "Coverage gaps"]);
+  assert.match(sections.textContent, /Assessment incomplete/);
+  assert.match(sections.textContent, /VVIX source degraded/);
+  assert.doesNotMatch(sections.textContent, /secret amount/);
+  assert.equal(descendants(sections).some(n => n.tagName === "IMG"), false);
+  const details = byClass(sections, "brief-full-details")[0];
+  assert.equal(details.tagName, "DETAILS");
+  assert.notEqual(details.open, true);
+  assert.match(details.textContent, /Held-name events require an available positions snapshot/);
+  assert.equal(byClass(sections, "brief-topic-link")[0].textContent, "Capital");
+  details.open = true;
+  brief.renderBriefCard(state.snapshot);
+  assert.equal(byClass(sections, "brief-full-details")[0].open, true, "snapshot refresh must preserve expanded evidence");
+});

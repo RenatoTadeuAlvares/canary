@@ -12,6 +12,7 @@ import (
 func runBrief(ctx context.Context, env *Env, args []string) int {
 	fs := flagSet(env, "brief")
 	jsonOut := fs.Bool("json", false, "emit machine-readable JSON")
+	details := fs.Bool("details", false, "include the full review, context, and input diagnostics")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
@@ -25,7 +26,11 @@ func runBrief(ctx context.Context, env *Env, args []string) int {
 	if *jsonOut {
 		return printJSON(env, res)
 	}
-	renderBrief(env, res)
+	if *details {
+		renderBriefDetails(env, res)
+	} else {
+		renderBrief(env, res)
+	}
 	return 0
 }
 
@@ -77,6 +82,32 @@ func splitVisibleWord(word string, width int) (string, string) {
 }
 
 func renderBrief(env *Env, res rpc.BriefResult) {
+	if res.Narrative == nil || res.Narrative.Overview == nil {
+		renderBriefDetails(env, res)
+		return
+	}
+	fmt.Fprintf(env.Stdout, "Daily brief · %s\n", res.AsOf.Local().Format("2 Jan 15:04 MST"))
+	overview := res.Narrative.Overview
+	width := briefProseWidth(env.Stdout)
+	briefProseParagraph(env, overview.Assessment, width)
+	for _, section := range []struct {
+		title string
+		rows  []rpc.BriefParagraph
+	}{
+		{"Needs review", overview.Attention}, {"Context", overview.Context}, {"Coverage gaps", overview.Coverage},
+	} {
+		if len(section.rows) == 0 {
+			continue
+		}
+		fmt.Fprintln(env.Stdout, "\n"+section.title)
+		for _, row := range section.rows {
+			briefProseParagraph(env, row.Runs, width)
+		}
+	}
+	fmt.Fprintln(env.Stdout, "\nDetails: canary brief --details · Sources: canary status")
+}
+
+func renderBriefDetails(env *Env, res rpc.BriefResult) {
 	fmt.Fprintf(env.Stdout, "Daily brief — %s  %s\n", res.AsOf.Local().Format("2006-01-02 15:04 MST"), shortFingerprint(res.BriefFingerprint))
 	narrative := servedBriefNarrative(res.Narrative)
 	if narrative == nil {
@@ -280,8 +311,16 @@ func briefLine(env *Env, label string, state rpc.BriefRowState, value string) {
 		value = "—"
 	}
 	// Detail and value carry broker-sourced text (symbols, blockers); the same
-	fmt.Fprintf(env.Stdout, "  %-18s %-11s %s\n", label, state.Status, sanitizeRunText(value))
-	fmt.Fprintf(env.Stdout, "    %s\n", sanitizeRunText(state.Detail))
+	for i, line := range wrapVisibleText(fmt.Sprintf("%s %s %s", label, state.Status, sanitizeRunText(value)), briefProseWidth(env.Stdout)-4) {
+		indent := "  "
+		if i > 0 {
+			indent = "    "
+		}
+		fmt.Fprintln(env.Stdout, indent+line)
+	}
+	if state.Detail != "" {
+		riskReadLine(env, "    ", state.Detail)
+	}
 }
 
 func briefJoin(values ...string) string {

@@ -22,7 +22,11 @@ function renderBriefCard(snap = state.snapshot || {}) {
   const narrative = servedNarrative(brief);
   sections.classList.toggle("brief-sections--narrative", Boolean(narrative));
   if (narrative) {
-    sections.replaceChildren(...renderNarrative(narrative, brief));
+    const expanded = [...sections.children].some(node => node.classList.contains("brief-full-details") && node.open);
+    const nodes = renderNarrative(narrative, brief, snap.sources || {});
+    const details = nodes.find(node => node.classList.contains("brief-full-details"));
+    if (details) details.open = expanded;
+    sections.replaceChildren(...nodes);
   } else {
     sections.replaceChildren(
       renderReviewSection(brief.review || {}, brief),
@@ -42,7 +46,7 @@ function servedNarrative(brief) {
   const review = paragraphList(narrative.review);
   const ready = paragraphList(narrative.ready);
   if (lead.length === 0 && review.length === 0 && ready.length === 0) return null;
-  return { lead, review, ready, coda: runList(narrative.coda) };
+  return { lead, review, ready, coda: runList(narrative.coda), overview: narrative.overview };
 }
 
 function runList(runs) {
@@ -54,7 +58,25 @@ function paragraphList(paragraphs) {
   return paragraphs.map((paragraph) => runList(paragraph?.runs)).filter((runs) => runs.length > 0);
 }
 
-function renderNarrative(narrative, brief) {
+function renderNarrative(narrative, brief, sources = {}) {
+  if (narrative.overview) {
+    const overview = narrative.overview;
+    const nodes = [runsElement("div", "pd-brf-lead", runList(overview.assessment))];
+    for (const [title, paragraphs] of [["Needs review", overview.attention], ["Context", overview.context], ["Coverage gaps", overview.coverage]]) {
+      const rows = paragraphList(paragraphs);
+      if (!rows.length) continue;
+      nodes.push(briefPlacard(title));
+      for (const runs of rows) nodes.push(runsElement("p", "pd-brf-para", runs));
+    }
+    const details = document.createElement("details");
+    details.className = "brief-full-details";
+    const summary = document.createElement("summary");
+    summary.textContent = "Full brief and input details";
+    details.append(summary);
+    details.append(renderReviewSection(brief.review || {}, brief), renderReadySection(brief.ready || {}, sources));
+    nodes.push(details);
+    return nodes;
+  }
   const nodes = [briefPlacardRow(brief)];
   if (narrative.lead.length > 0) nodes.push(runsElement("div", "pd-brf-lead", narrative.lead));
   nodes.push(briefPlacard("Review"));
@@ -331,7 +353,7 @@ function proposalsValue(row = {}) {
 // ahead. Counts only — the served facts, never an action affordance.
 function readyProposalsValue(row = {}) {
   return joinValues(
-    integerValue(row, "actionable", "Ready to act"),
+    integerValue(row, "actionable", "Unblocked"),
     integerValue(row, "blocked", "Blocked"),
     integerValue(row, "total", "Staged"),
   );

@@ -120,3 +120,58 @@ func TestRegimeProfilesAreExplicitAndScalarsSurvive(t *testing.T) {
 		}
 	}
 }
+
+func TestDegradedRiskReadsHaveHierarchyAndBoundedLines(t *testing.T) {
+	at := time.Date(2026, 9, 5, 14, 23, 0, 0, time.Local)
+	res := rpc.RegimeSnapshotResult{
+		AuthorityHealth:  &rpc.RegimeAuthorityHealth{Status: rpc.RegimeAuthorityStale, LastSuccessAt: &at},
+		VIXTermStructure: rpc.RegimeVIXTerm{Status: "ok", Ratio: new(0.8), RegimeIndicatorMeta: rpc.RegimeIndicatorMeta{Band: "green", AsOf: &rpc.RegimeAsOfSummary{Time: at, Source: "broker"}}},
+		WarningDetails:   []rpc.RegimeWarning{{Code: "vvix_source", Message: "Separate DNS failure " + strings.Repeat("x", 200)}},
+	}
+	var out bytes.Buffer
+	env := &Env{Stdout: &out, Stderr: &out}
+	renderRegime(env, res, false)
+	if strings.Contains(out.String(), "green") || !strings.Contains(out.String(), "recorded:") || strings.Contains(out.String(), "Separate DNS") {
+		t.Fatal("retained evidence appears current or diagnostic leaked", out.String())
+	}
+	out.Reset()
+	renderRegime(env, res, true)
+	for _, want := range []string{"5 Sep 14:23", "Recorded band", "not a current rating", "Separate DNS", "    Observed"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %q: %s", want, out.String())
+		}
+	}
+	for line := range strings.SplitSeq(out.String(), "\n") {
+		if visibleLen(line) > 80 {
+			t.Fatalf("unwrapped line: %s", line)
+		}
+	}
+	out.Reset()
+	env.Conn = &riskReadConn{err: &rpc.Error{Code: rpc.CodeGatewayUnavailable, Message: strings.Repeat("private transport detail ", 20)}}
+	if Run(t.Context(), env, "stress", nil) != 1 || !strings.Contains(out.String(), "Gateway unavailable") || strings.Contains(out.String(), "private transport") {
+		t.Fatal("stress did not preserve failure with a compact explanation", out.String())
+	}
+	out.Reset()
+	if Run(t.Context(), env, "stress", []string{"--details"}) != 1 || !strings.Contains(out.String(), "private transport") {
+		t.Fatal("detail diagnostic missing")
+	}
+}
+
+func TestBriefOverviewDefaultAndFullDetailRemainDistinct(t *testing.T) {
+	res := rpc.BriefResult{Narrative: &rpc.BriefNarrative{
+		Lead:     []rpc.BriefRun{{Text: "Full explanation"}},
+		Overview: &rpc.BriefOverview{Assessment: []rpc.BriefRun{{Text: "Assessment incomplete."}}, Attention: []rpc.BriefParagraph{{Runs: []rpc.BriefRun{{Text: "Capital warning", Role: rpc.BriefRunRoleWatch}}}}, Coverage: []rpc.BriefParagraph{{Runs: []rpc.BriefRun{{Text: "Portfolio unavailable"}}}}},
+	}}
+	var out bytes.Buffer
+	env := &Env{Conn: &riskReadConn{result: res}, Stdout: &out, Stderr: &out}
+	if Run(t.Context(), env, "brief", nil) != 0 {
+		t.Fatal(out.String())
+	}
+	if strings.Contains(out.String(), "Full explanation") || !strings.Contains(out.String(), "Capital warning") || !strings.Contains(out.String(), "Portfolio unavailable") {
+		t.Fatal(out.String())
+	}
+	out.Reset()
+	if Run(t.Context(), env, "brief", []string{"--details"}) != 0 || !strings.Contains(out.String(), "Full explanation") {
+		t.Fatal("full evidence unavailable", out.String())
+	}
+}

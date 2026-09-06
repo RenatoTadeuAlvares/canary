@@ -7359,3 +7359,15 @@ body:has(#alertsPanel[data-state="unknown"]) #alertAuthorityState {
   .underlying-row__metric--open { grid-column: 2; grid-row: 2; }
   .underlying-row__disclosure { grid-column: 1; grid-row: 1; align-self: start; }
 }
+
+.brief-full-details {
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.brief-full-details > summary {
+  cursor: pointer;
+  color: var(--pd-prose);
+  font-size: 13px;
+  padding: 8px 2px;
+}

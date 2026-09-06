@@ -1749,7 +1749,32 @@ func cloneBriefResult(in *rpc.BriefResult) *rpc.BriefResult {
 		monthly := *in.Ready.MonthlyPulse
 		out.Ready.MonthlyPulse = &monthly
 	}
+	if in.Narrative != nil {
+		n := *in.Narrative
+		n.Lead = append([]rpc.BriefRun(nil), n.Lead...)
+		n.Coda = append([]rpc.BriefRun(nil), n.Coda...)
+		n.Review = cloneBriefParagraphs(n.Review)
+		n.Ready = cloneBriefParagraphs(n.Ready)
+		if n.Overview != nil {
+			o := *n.Overview
+			o.Assessment = append([]rpc.BriefRun(nil), o.Assessment...)
+			o.Attention = cloneBriefParagraphs(o.Attention)
+			o.Context = cloneBriefParagraphs(o.Context)
+			o.Coverage = cloneBriefParagraphs(o.Coverage)
+			n.Overview = &o
+		}
+		out.Narrative = &n
+	}
+
 	return &out
+}
+
+func cloneBriefParagraphs(in []rpc.BriefParagraph) []rpc.BriefParagraph {
+	out := append([]rpc.BriefParagraph(nil), in...)
+	for i := range out {
+		out[i].Runs = append([]rpc.BriefRun(nil), out[i].Runs...)
+	}
+	return out
 }
 
 func cloneValue[T any](in *T) *T {

@@ -158,6 +158,8 @@ canary technical SYM[,SYM...] [--benchmark SPY] [--market us|de] [--json]
 
 Detailed broad-market regime across volatility, credit, funding, FX, gamma, and breadth.
 
+Recorded readings from stale authority are explicit. `--explain` includes observation times, thresholds, calibration, and source diagnostics. JSON preserves detailed measurements; `--profiles` opts into large gamma arrays.
+
 Guard `read-only`. Also available as an MCP tool.
 
 ```text
@@ -176,6 +178,8 @@ canary regime [--explain] [--json [--profiles]]
 
 Portfolio stress with margin, exposure, concentration, options, protection, and source evidence.
 
+The default view separates findings from coverage gaps. `--details` includes quiet evidence and diagnostics. Required-input failures remain nonzero exits, with full error detail available explicitly.
+
 Guard `read-only`. Also available as an MCP tool.
 
 ```text
@@ -193,16 +197,19 @@ canary stress [--details] [--json]
 
 Combined post- and pre-trade operator brief with disclosed source degradation.
 
+The default view prioritizes assessment completeness, findings, dated context, and coverage gaps. `--details` retains the full Review/Ready evidence and input diagnostics; JSON retains all typed rows and the daemon-authored overview.
+
 Guard `read-only`. Also available as an MCP tool.
 
 ```text
-canary brief [--json]
+canary brief [--details] [--json]
 ```
 
 **Flags**
 
 | Flag | Takes a value | Allowed values |
 |------|---------------|----------------|
+| `--details` | no | - |
 | `--json` | no | - |
 
 ## `canary edge`

@@ -26,6 +26,9 @@ const defaultOutput = "docs/docs/reference/cli.md"
 // that can reach the broker must not read like an ordinary lookup on a public
 // page, and a guard class on its own does not say that.
 var commandNotes = map[string]string{
+	"brief":  "The default view prioritizes assessment completeness, findings, dated context, and coverage gaps. `--details` retains the full Review/Ready evidence and input diagnostics; JSON retains all typed rows and the daemon-authored overview.",
+	"regime": "Recorded readings from stale authority are explicit. `--explain` includes observation times, thresholds, calibration, and source diagnostics. JSON preserves detailed measurements; `--profiles` opts into large gamma arrays.",
+	"stress": "The default view separates findings from coverage gaps. `--details` includes quiet evidence and diagnostics. Required-input failures remain nonzero exits, with full error detail available explicitly.",
 	"order": "`status` reads one journaled order and `preview` mints a tokenized draft: it runs the broker WhatIf and never transmits, and a minted token is not submit eligibility. " +
 		"`place`, `modify`, and `cancel` are broker writes: each requires an explicit human instruction for that exact order, and place/modify additionally consume a submit-eligible preview token through the daemon's ordinary admission gates (mode and account pins, caps, freeze, origin, journal). " +
 		"The constrained proposal and opportunity surfaces remain the daemon-authored candidate paths; this family is the operator's direct gated path.",

@@ -425,13 +425,24 @@ type BriefParagraph struct {
 	Runs []BriefRun `json:"runs,omitempty"`
 }
 
-// BriefNarrative is the daemon-composed prose reading of the same two
-// and Ready only, and a prose revision can never invalidate its identity.
+// BriefOverview is the daemon-authored reading order for the compact Brief.
+// Runs preserve privacy and severity; observation dates are never inferred from
+// the brief generation time. Full rows and narrative remain available as detail.
+type BriefOverview struct {
+	Assessment []BriefRun       `json:"assessment,omitempty"`
+	Attention  []BriefParagraph `json:"attention,omitempty"`
+	Context    []BriefParagraph `json:"context,omitempty"`
+	Coverage   []BriefParagraph `json:"coverage,omitempty"`
+}
+
+// BriefNarrative contains the compact overview and the full daemon-composed prose.
+// Presentation revisions do not change the row-derived brief fingerprint.
 type BriefNarrative struct {
-	Lead   []BriefRun       `json:"lead,omitempty"`
-	Review []BriefParagraph `json:"review,omitempty"`
-	Ready  []BriefParagraph `json:"ready,omitempty"`
-	Coda   []BriefRun       `json:"coda,omitempty"`
+	Overview *BriefOverview   `json:"overview,omitempty"`
+	Lead     []BriefRun       `json:"lead,omitempty"`
+	Review   []BriefParagraph `json:"review,omitempty"`
+	Ready    []BriefParagraph `json:"ready,omitempty"`
+	Coda     []BriefRun       `json:"coda,omitempty"`
 }
 
 // BriefResult is the complete typed daily brief, composed as two process

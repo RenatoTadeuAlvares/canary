@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/osauer/canary/v2/internal/risk"
 	"strings"
 
 	"github.com/osauer/canary/v2/internal/rpc"
@@ -39,39 +41,85 @@ func runRegime(ctx context.Context, env *Env, args []string) int {
 
 func renderRegime(env *Env, res rpc.RegimeSnapshotResult, explain bool) {
 	monitor := rpc.CompactRegimeMonitor(&res)
-	riskReadLine(env, "Regime", res.AsOf.Format("2006-01-02 15:04 MST"), res.Composite.Verdict, res.Lifecycle.Stage)
-	if h := res.AuthorityHealth; h != nil {
-		riskReadLine(env, "Authority", string(h.Status), string(h.FailureCode))
+	current := res.AuthorityHealth != nil && res.AuthorityHealth.Status == rpc.RegimeAuthorityFresh
+	verdict := res.Composite.Verdict
+	if verdict == "" {
+		verdict = "unavailable"
+	} else if !current {
+		verdict = "recorded verdict: " + verdict
 	}
-	riskReadLine(env, "Evidence", res.Summary.Evidence)
+	riskReadLine(env, "Regime", verdict)
+	if h := res.AuthorityHealth; h != nil {
+		riskReadLine(env, "Evidence", string(h.Status), strings.ReplaceAll(string(h.FailureCode), "_", " "))
+		if h.LastSuccessAt != nil {
+			riskReadLine(env, "Last successful refresh", h.LastSuccessAt.Local().Format("2 Jan 15:04 MST"))
+		}
+	}
 	riskReadLine(env, "Readiness", res.Lifecycle.Readiness)
+	if explain {
+		riskReadLine(env, "Snapshot generated", res.AsOf.Local().Format("2 Jan 15:04 MST"), res.Lifecycle.Stage)
+		riskReadLine(env, "Clusters", res.Summary.Evidence)
+	}
+	fmt.Fprintln(env.Stdout, "\nIndicators")
 	for _, row := range monitor.Indicators {
 		reading := row.Reading
 		if reading == "" {
 			reading = "unavailable"
 		}
-		riskReadLine(env, row.Name, row.Status, row.Band, reading, row.FreshnessClass)
+		band := row.Band
+		if !current || row.Status != rpc.RegimeStatusOK {
+			band = ""
+			if reading != "unavailable" {
+				reading = "recorded: " + reading
+			}
+		}
+		riskReadLine(env, "  "+row.Name, reading, row.Status, strings.ReplaceAll(row.FreshnessClass, "_", " "), band)
+		if explain && (!current || row.Status != rpc.RegimeStatusOK) && row.Band != "" {
+			riskReadLine(env, "    Recorded band", row.Band, "not a current rating")
+		}
 		if row.Eligibility != nil && !row.Eligibility.Eligible {
-			riskReadLine(env, "  Confirmation", "not eligible", strings.Join(row.Eligibility.Reasons, "; "))
+			riskReadLine(env, "    Confirmation", "not eligible", strings.Join(row.Eligibility.Reasons, "; "))
 		}
 		if explain {
 			if row.AsOf != nil {
-				riskReadLine(env, "  Observed", row.AsOf.Label, row.AsOf.Date, row.AsOf.Freshness, row.AsOf.Source)
+				observed := row.AsOf.Date
+				if observed == "" && !row.AsOf.Time.IsZero() {
+					observed = row.AsOf.Time.Local().Format("2 Jan 15:04 MST")
+				}
+				if observed == "" {
+					observed = row.AsOf.Label
+				}
+				riskReadLine(env, "    Observed", observed, row.AsOf.Source)
 			}
 			if th := row.Thresholds; th != nil {
-				riskReadLine(env, "  Thresholds", "green: "+th.Green, "yellow: "+th.Yellow, "red: "+th.Red)
-				if th.PendingBacktest {
-					riskReadLine(env, "  Calibration", "pending backtest")
-				}
+				riskReadLine(env, "    Thresholds", "green: "+th.Green, "yellow: "+th.Yellow, "red: "+th.Red)
 			}
 		}
 	}
-	for _, warning := range res.WarningDetails {
-		riskReadLine(env, "Warning", warning.Code, warning.Message)
+	if !explain {
+		if len(res.WarningDetails) > 0 {
+			riskReadLine(env, "\nSource issues", fmt.Sprintf("%d reported; see --explain", len(res.WarningDetails)))
+		}
+		fmt.Fprintln(env.Stdout, "\nDetails: canary regime --explain")
 	}
-	for _, insight := range monitor.GammaInsights {
-		if insight != nil {
-			riskReadLine(env, "Gamma", insight.Interpretation, insight.HorizonInterpretation, insight.SkewInterpretation, insight.Provenance)
+	if explain {
+		fmt.Fprintln(env.Stdout, "\nSource diagnostics")
+		for _, warning := range res.WarningDetails {
+			riskReadLine(env, "  "+warning.Code, warning.Message)
+		}
+		for _, insight := range monitor.GammaInsights {
+			if insight != nil {
+				riskReadLine(env, "  Gamma", insight.Interpretation, insight.HorizonInterpretation, insight.SkewInterpretation, insight.Provenance)
+			}
+		}
+		var pending []string
+		for _, row := range monitor.Indicators {
+			if row.Thresholds != nil && row.Thresholds.PendingBacktest {
+				pending = append(pending, row.Name)
+			}
+		}
+		if len(pending) > 0 {
+			riskReadLine(env, "Pending backtest", strings.Join(pending, ", "))
 		}
 	}
 	if explain {
@@ -96,7 +144,22 @@ func runStress(ctx context.Context, env *Env, args []string) int {
 	}
 	res, err := stress.FetchStress(ctx, env.Conn)
 	if err != nil {
-		return fail(env, "stress: %v", err)
+		if *jsonOut {
+			return fail(env, "stress: %v", err)
+		}
+		diagnostic := &Env{Stdout: env.Stderr}
+		riskReadLine(diagnostic, "Portfolio stress", "unavailable")
+		var rpcErr *rpc.Error
+		if errors.As(err, &rpcErr) && rpcErr.Code == rpc.CodeGatewayUnavailable {
+			riskReadLine(diagnostic, "", "Gateway unavailable; required inputs could not be read.")
+		} else {
+			riskReadLine(diagnostic, "", "A required input could not be read.")
+		}
+		riskReadLine(diagnostic, "Next", "canary status · canary stress --details")
+		if *details {
+			riskReadLine(diagnostic, "Diagnostic", err.Error())
+		}
+		return 1
 	}
 	if *jsonOut {
 		return printJSON(env, res)
@@ -106,26 +169,64 @@ func runStress(ctx context.Context, env *Env, args []string) int {
 }
 
 func renderStress(env *Env, res rpc.StressResult, details bool) {
-	riskReadLine(env, "Portfolio stress", res.AsOf.Format("2006-01-02 15:04 MST"), res.Action, string(res.Severity))
+	riskReadLine(env, "Portfolio stress", strings.ReplaceAll(res.Action, "_", " "), string(res.Severity))
 	riskReadLine(env, "Assessment", res.Summary)
 	riskReadLine(env, "Inputs", res.InputHealth, "market: "+res.MarketConfirmation, "portfolio fit: "+res.PortfolioFit)
-	for _, row := range res.Rows {
-		riskReadLine(env, row.Title, string(row.Severity), row.Evidence, row.Guidance)
-	}
-	for _, warning := range res.Warnings {
-		riskReadLine(env, "Warning", warning)
+	for _, group := range []struct {
+		title   string
+		quality bool
+	}{{"Findings", false}, {"Coverage gaps", true}} {
+		printed := false
+		for i, row := range res.Rows {
+			if i == 0 && row.Title == "Portfolio stress" {
+				continue
+			}
+			if (row.Direction == risk.DirectionDataQuality) != group.quality {
+				continue
+			}
+			if !details && row.Severity == risk.SeverityObserve {
+				continue
+			}
+			if !printed {
+				fmt.Fprintln(env.Stdout, "\n"+group.title)
+				printed = true
+			}
+			riskReadLine(env, "  "+row.Title, string(row.Severity), row.Evidence)
+			if details || !group.quality {
+				riskReadLine(env, "    ", row.Guidance)
+			}
+		}
 	}
 	if details {
+		riskReadLine(env, "\nSnapshot generated", res.AsOf.Local().Format("2 Jan 15:04 MST"))
+		if len(res.Rows) > 0 && res.Rows[0].Title == "Portfolio stress" {
+			riskReadLine(env, "Overall evidence", res.Rows[0].Evidence)
+		}
+		for _, warning := range res.Warnings {
+			riskReadLine(env, "Warning", warning)
+		}
 		for _, row := range res.MarketIndicators {
 			riskReadLine(env, row.Name, row.Status, row.Reading, row.AsOf, row.Comment)
 		}
 		for _, source := range res.SourceHealth {
 			riskReadLine(env, "Source", source.Source, source.Status, source.AsOf.Format("2006-01-02 15:04 MST"), strings.Join(source.Notes, "; "))
 		}
+	} else {
+		fmt.Fprintln(env.Stdout)
+		riskReadLine(env, "Details", fmt.Sprintf("canary stress --details · %d source notes", len(res.Warnings)))
 	}
 	riskReadLine(env, "", res.NotExecution)
 }
 
 func riskReadLine(env *Env, label string, values ...string) {
-	fmt.Fprintln(env.Stdout, sanitizeRunText(briefJoin(append([]string{label}, values...)...)))
+	indent := label[:len(label)-len(strings.TrimLeft(label, " "))]
+	text := sanitizeRunText(briefJoin(append([]string{label}, values...)...))
+	width := briefProseWidth(env.Stdout)
+	for i, line := range wrapVisibleText(text, width-len(indent)-2) {
+		if i == 0 {
+			fmt.Fprintln(env.Stdout, indent+line)
+		} else {
+			fmt.Fprintln(env.Stdout, indent+"  "+line)
+		}
+	}
 }
