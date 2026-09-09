@@ -43,6 +43,9 @@ func (t MethodTiming) ClientTimeout(headroom time.Duration) time.Duration {
 var methodTimings = []MethodTiming{
 	{Method: MethodAccountSummary, Lifetime: MethodLifetimeUnary, DaemonTimeout: 10 * time.Second},
 	{Method: MethodPositionsList, Lifetime: MethodLifetimeUnary, DaemonTimeout: 30 * time.Second},
+	{Method: MethodPortfolioSnapshot, Lifetime: MethodLifetimeUnary, DaemonTimeout: 35 * time.Second},
+	{Method: MethodMarketSnapshot, Lifetime: MethodLifetimeUnary, DaemonTimeout: 35 * time.Second},
+	{Method: MethodMarketHistory, Lifetime: MethodLifetimeUnary, DaemonTimeout: 35 * time.Second},
 	{Method: MethodQuoteSnapshot, Lifetime: MethodLifetimeUnary, DaemonTimeout: 10 * time.Second},
 	{Method: MethodQuoteSubscribe, Lifetime: MethodLifetimeStreaming},
 	{Method: MethodChainFetch, Lifetime: MethodLifetimeUnary, DaemonTimeout: 50 * time.Second},

@@ -35,6 +35,49 @@ type Tool struct {
 // cli.Commands() to keep the parity test readable; the MCP client rebroadcasts
 // whatever order we send.
 var Tools = []Tool{
+	{Name: "canary_portfolio", Title: "Canary Portfolio Composition", RPCMethods: []string{rpc.MethodPortfolioSnapshot}, Description: "Read current signed asset-class and IBKR industry values in account base currency, with valuation and classification coverage. Options are classified by their underlying. Cost basis uses broker average cost including the option multiplier. This is current valuation, not risk exposure, a return percentage, or statement performance.", JSONSchema: schemaObject(nil, nil), Handler: func(ctx context.Context, conn *dial.Conn, args json.RawMessage) (json.RawMessage, error) {
+		var res rpc.PortfolioSnapshotResult
+		if err := conn.Call(ctx, rpc.MethodPortfolioSnapshot, nil, &res); err != nil {
+			return nil, err
+		}
+		return json.Marshal(res)
+	}},
+	{Name: "canary_recon_status", Title: "Canary Reconciliation Status", RPCMethods: []string{rpc.MethodReconStatus}, Description: "Read redacted automatic statement acquisition and capital-flow/equity reconciliation status. Acquisition health is separate from evaluation. This does not prove complete broker order or fill visibility and performs no refresh, reconciliation acknowledgement, or broker action.", JSONSchema: schemaObject(nil, nil), Handler: func(ctx context.Context, conn *dial.Conn, args json.RawMessage) (json.RawMessage, error) {
+		var res rpc.ReconStatusResult
+		if err := conn.Call(ctx, rpc.MethodReconStatus, rpc.ReconStatusParams{}, &res); err != nil {
+			return nil, err
+		}
+		return json.Marshal(res)
+	}},
+
+	{
+		Name: "canary_market", Title: "Canary Market Quotes", RPCMethods: []string{rpc.MethodMarketSnapshot},
+		Description: "Read benchmark quotes and independent quotes for held underlyings, including option-only holdings. Preserves contract identity, current versus close prices, feed quality, source timestamps and partial coverage. Benchmarks name their actual instruments, including ETFs. Use canary_positions for valuation and Greeks; this is not a chart or order tool.",
+		JSONSchema:  schemaObject(nil, nil),
+		Handler: func(ctx context.Context, conn *dial.Conn, _ json.RawMessage) (json.RawMessage, error) {
+			var res rpc.MarketSnapshotResult
+			if err := conn.Call(ctx, rpc.MethodMarketSnapshot, nil, &res); err != nil {
+				return nil, err
+			}
+			return json.Marshal(res)
+		},
+	},
+	{
+		Name: "canary_market_history", Title: "Canary Price History", RPCMethods: []string{rpc.MethodMarketHistory},
+		Description: "Read bounded observed underlying price bars for a chart. Intraday ranges include extended hours; longer ranges use daily regular-session bars. Missing or rejected history is unavailable, never an empty healthy chart. Use canary_market for current quotes and canary_technical for analysis. No option history, continuous futures roll series, or trading authority. Futures history belongs to the exact dated contract.",
+		JSONSchema:  schemaObject(map[string]json.RawMessage{"contract": json.RawMessage(`{"type":"object","description":"Exact underlying identity; specify symbol, sec_type (STK, IND, CASH, FUT), exchange and currency; preserve con_id when known.","properties":{"symbol":{"type":"string"},"sec_type":{"type":"string"},"exchange":{"type":"string"},"currency":{"type":"string"},"con_id":{"type":"integer"},"primary_exchange":{"type":"string"},"local_symbol":{"type":"string"},"trading_class":{"type":"string"},"multiplier":{"type":"integer"},"expiry":{"type":"string"}},"required":["symbol","sec_type","exchange","currency"]}`), "range": schemaEnum([]string{"1D", "5D", "1M", "6M", "YTD", "1Y", "5Y"}, "Requested date range; 1D uses 5-minute bars, 5D 30-minute bars, longer ranges daily bars.")}, []string{"contract", "range"}),
+		Handler: func(ctx context.Context, conn *dial.Conn, args json.RawMessage) (json.RawMessage, error) {
+			var p rpc.MarketHistoryParams
+			if err := unmarshalArgs(args, &p); err != nil {
+				return nil, err
+			}
+			var res rpc.MarketHistoryResult
+			if err := conn.Call(ctx, rpc.MethodMarketHistory, p, &res); err != nil {
+				return nil, err
+			}
+			return json.Marshal(res)
+		},
+	},
 	{
 		Name:               "canary_status",
 		RPCMethods:         []string{rpc.MethodStatusHealth},

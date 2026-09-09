@@ -1901,7 +1901,7 @@ func (s *Server) absentQuoteShell(q *rpc.Quote, err error, market marketcal.Mark
 
 func isOptionQuoteContract(c rpc.ContractParams) bool {
 	return strings.EqualFold(strings.TrimSpace(c.SecType), "OPT") ||
-		strings.TrimSpace(c.Expiry) != "" ||
+		(strings.TrimSpace(c.Expiry) != "" && !strings.EqualFold(strings.TrimSpace(c.SecType), "FUT")) ||
 		strings.TrimSpace(c.Right) != "" ||
 		c.Strike > 0
 }
@@ -1922,7 +1922,7 @@ func normaliseStockQuoteContract(in rpc.ContractParams) (ibkrlib.Contract, rpc.C
 	localSymbol := strings.TrimSpace(in.LocalSymbol)
 	tradingClass := strings.TrimSpace(in.TradingClass)
 
-	routed := market != "" && market != "us" ||
+	routed := in.ConID > 0 || secType != "STK" || market != "" && market != "us" ||
 		exchange != "" ||
 		primary != "" ||
 		localSymbol != "" ||
@@ -1963,6 +1963,7 @@ func normaliseStockQuoteContract(in rpc.ContractParams) (ibkrlib.Contract, rpc.C
 		LocalSymbol:  localSymbol,
 		TradingClass: tradingClass,
 		Multiplier:   in.Multiplier,
+		Expiry:       strings.TrimSpace(in.Expiry),
 	}
 	if !routed {
 		echo.Exchange = ""
@@ -1980,6 +1981,7 @@ func normaliseStockQuoteContract(in rpc.ContractParams) (ibkrlib.Contract, rpc.C
 		LocalSymbol:  localSymbol,
 		TradingClass: tradingClass,
 		Multiplier:   in.Multiplier,
+		Expiry:       strings.TrimSpace(in.Expiry),
 	}
 	return contract, echo, routed, nil
 }

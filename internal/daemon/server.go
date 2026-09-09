@@ -55,6 +55,7 @@ var perCandidateConnectBudget = 25 * time.Second
 
 // Server is the daemon process state.
 type Server struct {
+	marketData marketDataCache
 	cfg        *config.Resolved
 	socketPath string
 	startedAt  time.Time
@@ -2295,6 +2296,12 @@ func (s *Server) dispatch(ctx context.Context, req *rpc.Request, enc *json.Encod
 		s.unary(req, enc, func() (any, error) { return s.handleAccountSummary(ctx) })
 	case rpc.MethodPositionsList:
 		s.unary(req, enc, func() (any, error) { return s.handlePositionsList(ctx, req) })
+	case rpc.MethodPortfolioSnapshot:
+		s.unary(req, enc, func() (any, error) { return s.handlePortfolioSnapshot(ctx) })
+	case rpc.MethodMarketSnapshot:
+		s.unary(req, enc, func() (any, error) { return s.handleMarketSnapshot(ctx, req) })
+	case rpc.MethodMarketHistory:
+		s.unary(req, enc, func() (any, error) { return s.handleMarketHistory(ctx, req) })
 	case rpc.MethodQuoteSnapshot:
 		s.unary(req, enc, func() (any, error) { return s.handleQuoteSnapshot(ctx, req) })
 	case rpc.MethodChainFetch:

@@ -4,7 +4,36 @@
 
 These are the tools `canary mcp` exposes to MCP clients (Claude Code, Claude Desktop, or any other MCP host). Every public tool uses the canonical `canary_*` namespace. Each entry lists the tool name an LLM picks against, the description the LLM reads to decide whether to invoke, and the parameter schema the LLM binds against.
 
-**20 tools** total. Listed in registration order, aligned with the agent-appropriate CLI commands. Local lifecycle commands such as `setup`, `update`, `restart`, `mcp`, `daemon`, and `version` are intentionally excluded from MCP tools.
+**24 tools** total. Listed in registration order, aligned with the agent-appropriate CLI commands. Local lifecycle commands such as `setup`, `update`, `restart`, `mcp`, `daemon`, and `version` are intentionally excluded from MCP tools.
+
+## `canary_portfolio`
+
+Read current signed asset-class and IBKR industry values in account base currency, with valuation and classification coverage. Options are classified by their underlying. Cost basis uses broker average cost including the option multiplier. This is current valuation, not risk exposure, a return percentage, or statement performance.
+
+*No parameters.*
+
+## `canary_recon_status`
+
+Read redacted automatic statement acquisition and capital-flow/equity reconciliation status. Acquisition health is separate from evaluation. This does not prove complete broker order or fill visibility and performs no refresh, reconciliation acknowledgement, or broker action.
+
+*No parameters.*
+
+## `canary_market`
+
+Read benchmark quotes and independent quotes for held underlyings, including option-only holdings. Preserves contract identity, current versus close prices, feed quality, source timestamps and partial coverage. Benchmarks name their actual instruments, including ETFs. Use canary_positions for valuation and Greeks; this is not a chart or order tool.
+
+*No parameters.*
+
+## `canary_market_history`
+
+Read bounded observed underlying price bars for a chart. Intraday ranges include extended hours; longer ranges use daily regular-session bars. Missing or rejected history is unavailable, never an empty healthy chart. Use canary_market for current quotes and canary_technical for analysis. No option history, continuous futures roll series, or trading authority. Futures history belongs to the exact dated contract.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `contract` | object | **yes** | Exact underlying identity; specify symbol, sec_type (STK, IND, CASH, FUT), exchange and currency; preserve con_id when known. |
+| `range` | string | **yes** | Requested date range; 1D uses 5-minute bars, 5D 30-minute bars, longer ranges daily bars. |
 
 ## `canary_status`
 

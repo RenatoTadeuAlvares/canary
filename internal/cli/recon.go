@@ -41,6 +41,17 @@ func runRecon(ctx context.Context, env *Env, args []string) int {
 		return printReconActionUsage(env, sub)
 	}
 	switch sub {
+	case "status":
+		fs := flagSet(env, "recon")
+		fs.Bool("json", false, "emit JSON")
+		if err := fs.Parse(args); err != nil {
+			return parseExit(err)
+		}
+		var res rpc.ReconStatusResult
+		if err := env.Conn.Call(ctx, rpc.MethodReconStatus, rpc.ReconStatusParams{}, &res); err != nil {
+			return fail(env, "recon status: %v", err)
+		}
+		return printJSON(env, res)
 	case "show":
 		return runReconShow(ctx, env, args)
 	case "backtest":
@@ -58,6 +69,7 @@ func printReconUsage(env *Env) {
 	fmt.Fprintln(env.Stdout, "canary recon — compare retained broker statements with Canary's capital ledger")
 	fmt.Fprintln(env.Stdout)
 	fmt.Fprintln(env.Stdout, "Actions:")
+	fmt.Fprintln(env.Stdout, "  status     Read automatic statement acquisition and evaluation health.")
 	fmt.Fprintln(env.Stdout, "  show       Show the current report and unresolved statement/ledger differences.")
 	fmt.Fprintln(env.Stdout, "  backtest   Replay statement equity against runtime drawdown history.")
 	fmt.Fprintln(env.Stdout, "  equity     Show the retained daily statement-equity timeline and capital events.")
@@ -73,6 +85,8 @@ func printReconUsage(env *Env) {
 
 func printReconActionUsage(env *Env, action string) int {
 	switch action {
+	case "status":
+		fmt.Fprintln(env.Stdout, "canary recon status — automatic acquisition and evaluation health\nUsage: canary recon status [--json]")
 	case "show":
 		fmt.Fprintln(env.Stdout, "canary recon show — inspect the current reconciliation report")
 		fmt.Fprintln(env.Stdout)

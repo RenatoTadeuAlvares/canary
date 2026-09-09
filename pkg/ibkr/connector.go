@@ -631,6 +631,7 @@ type historicalResult struct {
 }
 
 type historicalRequest struct {
+	intraday                   bool
 	symbol                     string
 	result                     chan historicalResult
 	strictDaily                bool
@@ -2325,6 +2326,7 @@ type ContractDetailsLite struct {
 // captured on one exact Connector session. Contract always has a positive
 // ConID; MinTick is zero only when the broker omitted it.
 type ResolvedOrderContract struct {
+	Industry   string
 	Contract   Contract
 	MinTick    float64
 	TimeZoneID string
@@ -2499,7 +2501,7 @@ func exactOrderContract(request Contract, details []ContractDetailsLite) (Resolv
 	if selected.TradingClass != "" {
 		resolved.TradingClass = selected.TradingClass
 	}
-	return ResolvedOrderContract{Contract: resolved, MinTick: selected.MinTick, TimeZoneID: selected.TimeZoneID}, nil
+	return ResolvedOrderContract{Contract: resolved, MinTick: selected.MinTick, TimeZoneID: selected.TimeZoneID, Industry: selected.Industry}, nil
 }
 
 // exactOrderContractRouteMatches applies caller-supplied routing as an
@@ -6215,7 +6217,7 @@ func (c *Connector) handleHistoricalData(fields []string) {
 		c.failHistoricalRequest(reqID, parseErr)
 		return
 	}
-	if req.strictDaily && idx != len(fields) {
+	if req.strictDaily && !historicalPayloadConsumed(fields, idx) {
 		c.failHistoricalRequest(reqID, &HistoricalDataValidationError{Reason: "trailing_payload"})
 		return
 	}
@@ -6232,6 +6234,12 @@ func (c *Connector) handleHistoricalData(fields []string) {
 		return
 	}
 	c.completeHistoricalRequest(reqID, result)
+}
+
+// The wire decoder retains one final empty field for the protocol NUL delimiter.
+// Accept that delimiter only; additional empty or nonempty fields are corruption.
+func historicalPayloadConsumed(fields []string, idx int) bool {
+	return idx == len(fields) || (idx == len(fields)-1 && fields[idx] == "")
 }
 
 func parseHistoricalBars(fields []string, idx *int, count int, strictDaily bool) ([]HistoricalBar, error) {
@@ -6305,17 +6313,20 @@ func parseHistoricalBars(fields []string, idx *int, count int, strictDaily bool)
 }
 
 func (c *Connector) handleHistoricalDataEnd(fields []string) {
-	if len(fields) < 3 {
-		return
+	// Accept modern unversioned and legacy versioned end receipts. The wire
+	// decoder retains the final delimiter; it is not an additional data field.
+	if len(fields) > 0 && fields[len(fields)-1] == "" {
+		fields = fields[:len(fields)-1]
 	}
-
 	idx := 1
-	if len(fields) > idx {
-		if _, err := strconv.Atoi(fields[idx]); err == nil {
-			idx++
+	switch len(fields) {
+	case 4: // message, request, start, end
+	case 5: // message, version, request, start, end
+		if fields[1] != "6" {
+			return
 		}
-	}
-	if idx >= len(fields) {
+		idx = 2
+	default:
 		return
 	}
 
@@ -6340,7 +6351,7 @@ func (c *Connector) handleHistoricalDataEnd(fields []string) {
 		end = fields[idx]
 		idx++
 	}
-	if req := c.getHistoricalRequest(reqID); req != nil && req.strictDaily && idx != len(fields) {
+	if req := c.getHistoricalRequest(reqID); req != nil && req.strictDaily && !historicalPayloadConsumed(fields, idx) {
 		c.failHistoricalRequest(reqID, &HistoricalDataValidationError{Reason: "trailing_payload"})
 		return
 	}
@@ -6405,6 +6416,8 @@ func (c *Connector) getHistoricalRequest(reqID int) *historicalRequest {
 }
 
 type historicalRequestOptions struct {
+	chartBarSize               string
+	chartOutsideRTH            bool
 	strictDaily                bool
 	waitForEnd                 bool
 	requestOwnsNoticeCollision bool
@@ -6415,7 +6428,7 @@ type historicalRequestOptions struct {
 
 func (c *Connector) createHistoricalRequestWithOptions(reqID int, symbol string, options historicalRequestOptions) *historicalRequest {
 	req := &historicalRequest{
-		symbol:                     symbol,
+		intraday: options.chartBarSize != "" && options.chartBarSize != "1 day", symbol: symbol,
 		result:                     make(chan historicalResult, 1),
 		strictDaily:                options.strictDaily,
 		waitForEnd:                 options.waitForEnd,
@@ -6438,12 +6451,18 @@ func (c *Connector) bufferHistoricalResult(reqID int, res historicalResult) erro
 		return nil
 	}
 	if req.strictDaily {
+		barKey := func(bar HistoricalBar) string {
+			if req.intraday {
+				return bar.Time.UTC().Format(time.RFC3339Nano)
+			}
+			return bar.Time.UTC().Format("2006-01-02")
+		}
 		seen := make(map[string]struct{}, len(req.bufferedBars)+len(res.bars))
 		for _, bar := range req.bufferedBars {
-			seen[bar.Time.UTC().Format("2006-01-02")] = struct{}{}
+			seen[barKey(bar)] = struct{}{}
 		}
 		for _, bar := range res.bars {
-			date := bar.Time.UTC().Format("2006-01-02")
+			date := barKey(bar)
 			if _, duplicate := seen[date]; duplicate {
 				return &HistoricalDataValidationError{Reason: "duplicate_session_date"}
 			}
@@ -7463,7 +7482,11 @@ func (c *Connector) fetchHistoricalWithContractOptions(ctx context.Context, symb
 	} else {
 		// Connection's shared monotonic broker namespace is the sole allocator
 		// affects only delayed-notice routing; it must not create a second
-		reqID, err = c.conn.requestHistoricalDataWithIDGuard(ctx, contract, "", duration, "1 day", whatToShow, true, false, formatDate, false, nil, register)
+		barSize := "1 day"
+		if options.chartBarSize != "" {
+			barSize = options.chartBarSize
+		}
+		reqID, err = c.conn.requestHistoricalDataWithIDGuard(ctx, contract, "", duration, barSize, whatToShow, !options.chartOutsideRTH, false, formatDate, false, nil, register)
 	}
 	if err != nil {
 		if registeredReqID != 0 {
