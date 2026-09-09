@@ -117,6 +117,10 @@ func TestPublicClientRejectsFailuresAndRedirectsWithoutCredentials(t *testing.T)
 		if r.Method != "GET" || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
 			t.Fatal("public source request carried authority")
 		}
+		// BEA's RSS server negotiates text/xml and otherwise returns HTTP 406.
+		if !strings.Contains(r.Header.Get("Accept"), "text/xml") {
+			t.Fatal("official RSS XML response excluded by content negotiation")
+		}
 		return &http.Response{StatusCode: 403, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("blocked")), Request: r}, nil
 	})
 	_, err := client.Fetch(context.Background(), sourceSpec(t, "bls-calendar"), time.Now())

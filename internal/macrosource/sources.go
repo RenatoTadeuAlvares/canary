@@ -78,7 +78,7 @@ func (c *Client) Fetch(ctx context.Context, s Spec, now time.Time) (Batch, error
 		return Batch{}, err
 	}
 	req.Header.Set("User-Agent", "Canary-public-feeds/1.0")
-	req.Header.Set("Accept", "text/calendar, application/rss+xml, application/json, application/xml, text/html")
+	req.Header.Set("Accept", "text/calendar, application/rss+xml, application/json, application/xml, text/xml, text/html")
 	res, err := c.HTTP.Do(req)
 	if err != nil {
 		return Batch{}, errors.New("public source request failed")
