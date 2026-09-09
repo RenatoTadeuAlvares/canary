@@ -316,6 +316,16 @@ async function runRound4SyntheticSmoke() {
   });
   await context.addInitScript(() => {
     globalThis.__canarySmoke = { applySnapshotPatch: null };
+    const nativeFetch = globalThis.fetch;
+    globalThis.fetch = async (...args) => {
+      const response = await nativeFetch(...args);
+      const smoke = globalThis.__canarySmoke;
+      if (smoke.holdNextBootstrap && new URL(String(args[0]), location.href).pathname === "/api/bootstrap") {
+        smoke.holdNextBootstrap = false;
+        await new Promise((resolve) => { smoke.releaseBootstrap = resolve; });
+      }
+      return response;
+    };
     try { Object.defineProperty(globalThis, "Notification", { configurable: true, value: undefined }); } catch {}
     try { Object.defineProperty(globalThis, "EventSource", { configurable: true, value: undefined }); } catch {}
     try { Object.defineProperty(globalThis.crypto, "subtle", { configurable: true, value: undefined }); } catch {}
@@ -2127,6 +2137,19 @@ async function exercisePortfolioDetail(page) {
 }
 
 async function exerciseProtectionRiskRendering(page, bootstrap = null) {
+  if (bootstrap) {
+    // Force the formerly intermittent race: the existing fallback response
+    // arrives after the local fixture patch and replaces its entire snapshot.
+    await page.evaluate(async () => {
+      const { state } = await import("./state.js");
+      const { refreshBootstrapIfSSEUnavailable } = await import("./lifecycle.js");
+      while (state.fallbackRefreshBusy) await new Promise((resolve) => setTimeout(resolve, 10));
+      const smoke = globalThis.__canarySmoke;
+      smoke.holdNextBootstrap = true;
+      smoke.pendingFallback = refreshBootstrapIfSSEUnavailable();
+    });
+    await page.waitForFunction(() => typeof globalThis.__canarySmoke.releaseBootstrap === "function", { timeout: 5000 });
+  }
   const fixture = await page.evaluate(() => {
     const positionsCoverage = {
       status: "review",
@@ -2312,10 +2335,20 @@ async function exerciseProtectionRiskRendering(page, bootstrap = null) {
     apply(patch, { protectionOpen: true, portfolioDetailOpen: true, stressDetailOpen: true });
     return patch;
   });
-  // Keep the synthetic GET bootstrap coherent with the rendered fixture when
-  // the production fallback poll refreshes during this interaction check.
+  // Publish the fixture to the intercepted server, drain the older response,
+  // then render the new server snapshot. Updating the response object alone
+  // cannot invalidate an already serialized fallback response.
   if (bootstrap) {
     for (const [key, value] of Object.entries(fixture)) bootstrap.snapshot[key] = { ...bootstrap.snapshot[key], ...value };
+    await page.evaluate(async () => {
+      const smoke = globalThis.__canarySmoke;
+      smoke.releaseBootstrap();
+      await smoke.pendingFallback;
+      const { bootstrap: refresh } = await import("./lifecycle.js");
+      if (!await refresh({ quiet: true })) throw new Error("synthetic fixture bootstrap failed");
+      smoke.releaseBootstrap = null;
+      smoke.pendingFallback = null;
+    });
   }
   await page.waitForFunction(() => {
     const portfolio = document.getElementById("portfolioDetailList")?.textContent?.toLowerCase() || "";
