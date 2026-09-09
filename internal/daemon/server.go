@@ -250,12 +250,15 @@ type Server struct {
 	// its path but never opens it: only the Start winner may touch daemon.db,
 	// after both the socket-specific instance lock and state-root persistence
 	// lock have been acquired.
+	macro            *macroCache
+	macroLoopWG      sync.WaitGroup
 	coreStore        *corestore.Store
 	coreStorePath    string
 	coreStorePathErr error
 	// productionStateDatabase distinguishes the XDG authority from isolated
 	// test/offline databases. Only production enforces the v2-to-v3 bridge.
 	productionStateDatabase bool
+	disableMacroSources     bool
 	persistenceLock         *persistenceLock
 	authorityCloseOnce      sync.Once
 	authorityCloseErr       error
@@ -460,6 +463,9 @@ type Options struct {
 	Logger     *Logger
 	// StateDatabasePath overrides daemon.db for isolated tests and offline
 	StateDatabasePath string
+	// DisableMacroSources keeps offline embeddings and hermetic CLI test binaries
+	// from starting public network readers, while retained records remain readable.
+	DisableMacroSources bool
 }
 
 // New constructs a Server with the supplied options.
@@ -468,19 +474,20 @@ func New(opts Options) *Server {
 		opts.Logger = NewLogger(os.Stderr, opts.Config.Daemon.LogLevel)
 	}
 	s := &Server{
-		cfg:            opts.Config,
-		socketPath:     opts.SocketPath,
-		version:        opts.Version,
-		now:            time.Now,
-		streams:        map[string]context.CancelFunc{},
-		idleStop:       make(chan struct{}),
-		logger:         opts.Logger,
-		expiryIVs:      newExpiryIVCache(),
-		quoteLiquidity: newQuoteLiquidityCache(),
-		prevCloses:     newPrevCloseCache(),
-		greeks:         newGreeksCache(),
-		zeroGamma:      newGammaZeroCache(),
-		fxRates:        newFXRateCache(),
+		disableMacroSources: opts.DisableMacroSources,
+		cfg:                 opts.Config,
+		socketPath:          opts.SocketPath,
+		version:             opts.Version,
+		now:                 time.Now,
+		streams:             map[string]context.CancelFunc{},
+		idleStop:            make(chan struct{}),
+		logger:              opts.Logger,
+		expiryIVs:           newExpiryIVCache(),
+		quoteLiquidity:      newQuoteLiquidityCache(),
+		prevCloses:          newPrevCloseCache(),
+		greeks:              newGreeksCache(),
+		zeroGamma:           newGammaZeroCache(),
+		fxRates:             newFXRateCache(),
 	}
 	if opts.StateDatabasePath != "" {
 		s.coreStorePath = opts.StateDatabasePath
@@ -1234,6 +1241,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	// The canonical Rulebook refresh may immediately need the gateway. Start
 	// all daemon-owned read loops only after the initial connect slot is claimed
+	s.startMacroSources(serverCtx)
 	s.startRegimeRefreshLoop(serverCtx)
 	s.startRulebookCanonicalRefreshLoop(serverCtx)
 	s.startAlertShadowObservationLoops(serverCtx)
@@ -2295,6 +2303,8 @@ func (s *Server) dispatch(ctx context.Context, req *rpc.Request, enc *json.Encod
 		s.unary(req, enc, func() (any, error) { return s.handleChainExpiries(ctx, req) })
 	case rpc.MethodTechnical:
 		s.unary(req, enc, func() (any, error) { return s.handleTechnical(ctx, req) })
+	case rpc.MethodMacroSnapshot:
+		s.unary(req, enc, func() (any, error) { return s.handleMacroSnapshot(), nil })
 	case rpc.MethodMarketCalendar:
 		s.unary(req, enc, func() (any, error) { return s.handleMarketCalendar(req) })
 	case rpc.MethodBreadthSPX:

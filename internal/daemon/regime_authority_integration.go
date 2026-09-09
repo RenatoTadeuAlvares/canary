@@ -65,6 +65,7 @@ func (s *Server) stopServerContextAndWait() {
 	if cancel != nil {
 		cancel()
 	}
+	s.macroLoopWG.Wait()
 	s.regimeRefreshLoopWG.Wait()
 	s.rulebookRefreshLoopWG.Wait()
 	s.alertShadowLoopWG.Wait()

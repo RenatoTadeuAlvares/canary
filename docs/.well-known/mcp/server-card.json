@@ -239,14 +239,30 @@
       }
     },
     {
+      "name": "canary_macro",
+      "description": "Read cached economic releases, central-bank meetings and recent official publications for the trading day. Includes BLS, BEA, Federal Reserve and ECB sources with per-feed availability, original times and a bounded window. Missing or stale feeds do not mean nothing is scheduled. Preserve source_label/date-only precision and truncation. This is official-source coverage, not a licensed general-news or consensus feed. Use canary_calendar for exchange hours and canary_brief for the current book and risk. Read-only; does not fetch, acknowledge, schedule or trade.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
       "name": "canary_regime",
-      "description": "Read the detailed broad-market regime: all eight indicators, independent clusters, confirmation eligibility, gamma horizons and skew, source health, and stale or unavailable evidence. Use after canary_brief or for an explicit market-regime question; use canary_stress for how that market state affects the held portfolio. Gamma is a conditional amplification/damping model; open interest does not identify dealer inventory or market direction. Read-only; no history or refresh controls.",
+      "description": "Read the detailed broad-market regime: all eight indicators, independent clusters, confirmation eligibility, gamma horizons and skew, source health, and stale or unavailable evidence. Choose view=monitor for the compact dashboard projection; full detail remains the default. Use after canary_brief or for an explicit market-regime question; use canary_stress for how that market state affects the held portfolio. Gamma is a conditional amplification/damping model; open interest does not identify dealer inventory or market direction. Read-only; no history or refresh controls.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "include_profiles": {
             "type": "boolean",
             "description": "Include large gamma profile arrays; false by default. Scalar measurements, thresholds, warnings and freshness are always retained."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "full",
+              "monitor"
+            ],
+            "description": "full (default) retains detailed evidence; monitor uses the shared compact dashboard projection. monitor cannot include gamma profile arrays."
           }
         }
       }

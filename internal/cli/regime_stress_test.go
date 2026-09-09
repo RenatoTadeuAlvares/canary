@@ -175,3 +175,28 @@ func TestBriefOverviewDefaultAndFullDetailRemainDistinct(t *testing.T) {
 		t.Fatal("full evidence unavailable", out.String())
 	}
 }
+
+func TestRegimeMonitorCLIUsesSharedAuthorityProjection(t *testing.T) {
+	want := rpc.RegimeSnapshotResult{AuthorityHealth: &rpc.RegimeAuthorityHealth{Status: rpc.RegimeAuthorityStale, LastSuccessAt: new(time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)), LastSuccessAgeSeconds: new(int64(600))}, FundingStress: rpc.RegimeFundingStress{Status: "unavailable"}}
+	conn := &riskReadConn{result: want}
+	var out bytes.Buffer
+	for _, args := range [][]string{{"--json", "--view", "bad"}, {"--json", "--view", "monitor", "--profiles"}, {"--view", "monitor"}} {
+		if Run(t.Context(), &Env{Conn: conn, Stdout: &out, Stderr: &out}, "regime", args) == 0 || len(conn.calls) != 0 {
+			t.Fatal("invalid monitor request reached RPC")
+		}
+	}
+	out.Reset()
+	if Run(t.Context(), &Env{Conn: conn, Stdout: &out, Stderr: &out}, "regime", []string{"--json", "--view", "monitor"}) != 0 {
+		t.Fatal(out.String())
+	}
+	var got rpc.RegimeMonitorResult
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	expectedRaw, _ := json.Marshal(rpc.CompactRegimeMonitor(&want))
+	var expected rpc.RegimeMonitorResult
+	_ = json.Unmarshal(expectedRaw, &expected)
+	if !reflect.DeepEqual(got, expected) {
+		t.Fatal("CLI monitor invented or dropped authority")
+	}
+}

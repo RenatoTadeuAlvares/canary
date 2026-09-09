@@ -4,7 +4,7 @@
 
 These are the tools `canary mcp` exposes to MCP clients (Claude Code, Claude Desktop, or any other MCP host). Every public tool uses the canonical `canary_*` namespace. Each entry lists the tool name an LLM picks against, the description the LLM reads to decide whether to invoke, and the parameter schema the LLM binds against.
 
-**19 tools** total. Listed in registration order, aligned with the agent-appropriate CLI commands. Local lifecycle commands such as `setup`, `update`, `restart`, `mcp`, `daemon`, and `version` are intentionally excluded from MCP tools.
+**20 tools** total. Listed in registration order, aligned with the agent-appropriate CLI commands. Local lifecycle commands such as `setup`, `update`, `restart`, `mcp`, `daemon`, and `version` are intentionally excluded from MCP tools.
 
 ## `canary_status`
 
@@ -106,15 +106,22 @@ Read official exchange sessions to plan work around market opens, closes, holida
 | `days` | integer | no | number of forward calendar dates including the selected date, not trading sessions; default 14, maximum 400 |
 | `market` | string | no | exchange-session market; default us. US listed options models the regular 16:15 session; per-class exceptions and global/curb hours are not modeled |
 
+## `canary_macro`
+
+Read cached economic releases, central-bank meetings and recent official publications for the trading day. Includes BLS, BEA, Federal Reserve and ECB sources with per-feed availability, original times and a bounded window. Missing or stale feeds do not mean nothing is scheduled. Preserve source_label/date-only precision and truncation. This is official-source coverage, not a licensed general-news or consensus feed. Use canary_calendar for exchange hours and canary_brief for the current book and risk. Read-only; does not fetch, acknowledge, schedule or trade.
+
+*No parameters.*
+
 ## `canary_regime`
 
-Read the detailed broad-market regime: all eight indicators, independent clusters, confirmation eligibility, gamma horizons and skew, source health, and stale or unavailable evidence. Use after canary_brief or for an explicit market-regime question; use canary_stress for how that market state affects the held portfolio. Gamma is a conditional amplification/damping model; open interest does not identify dealer inventory or market direction. Read-only; no history or refresh controls.
+Read the detailed broad-market regime: all eight indicators, independent clusters, confirmation eligibility, gamma horizons and skew, source health, and stale or unavailable evidence. Choose view=monitor for a compact dashboard projection or view=full (default) for detailed evidence. Use after canary_brief or for an explicit market-regime question; use canary_stress for how that market state affects the held portfolio. Gamma is a conditional amplification/damping model; open interest does not identify dealer inventory or market direction. Read-only; no history or refresh controls.
 
 **Parameters:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | `include_profiles` | boolean | no | Include large gamma profile arrays; false by default. Scalar measurements, thresholds, warnings and freshness are always retained. |
+| `view` | string | no | full (default) retains detailed evidence; monitor uses the shared compact dashboard projection. monitor cannot include gamma profile arrays. |
 
 ## `canary_stress`
 

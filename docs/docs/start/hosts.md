@@ -136,3 +136,24 @@ remain CLI-only. The [MCP tools reference](../reference/mcp-tools.md) is generat
 from the registry and lists every parameter.
 
 The bundled MCP surface has no order-entry or preview tools. A unit test enforces that boundary against the tool registry by name. [Orders and the trading build](../operate/orders.md) owns the confirmed CLI and app paths.
+
+### Public macro context
+
+`canary_macro` reads the daemon's cached official economic calendar and recent
+BEA, Federal Reserve and ECB publications. The fixed public sources refresh
+every five minutes while the production daemon runs; reads send no account
+information. A failed feed retains its dated last-good entries and reports the
+failure, including HTTP 403. Thirty minutes without a successful read marks it
+stale. Restart validates source identity, timestamps and child provenance before
+restoring a cache. Isolated test/offline databases do not start public readers.
+
+The overview covers yesterday through the next seven calendar dates and recent
+publications, with explicit truncation. Events retain `source_id`, `source_url`,
+`retrieved_at`, and either an exact instant, a literal source time label, or a
+date without an invented time. Join source health through `sources[].id`; an
+available response never establishes that the day has no other news or releases.
+
+For a compact market dashboard, call `canary_regime` with `view: "monitor"`, or
+`canary regime --json --view monitor`. It uses the shared typed monitor
+projection, retaining indicator eligibility and freshness. The default remains
+full detail; monitor cannot be combined with profile arrays.

@@ -265,20 +265,46 @@ var Tools = []Tool{
 		},
 	},
 	{
+		Name: "canary_macro", Title: "Canary Economic Calendar and Official News",
+		Description: "Read cached economic releases, central-bank meetings and recent official publications for the trading day. Includes BLS, BEA, Federal Reserve and ECB sources with per-feed availability, original times and a bounded window. Missing or stale feeds do not mean nothing is scheduled. Preserve source_label/date-only precision and truncation. This is official-source coverage, not a licensed general-news or consensus feed. Use canary_calendar for exchange hours and canary_brief for the current book and risk. Read-only; does not fetch, acknowledge, schedule or trade.",
+		JSONSchema:  schemaObject(nil, nil), ReadOnlyHint: new(true), RPCMethods: []string{rpc.MethodMacroSnapshot},
+		Handler: func(ctx context.Context, conn *dial.Conn, args json.RawMessage) (json.RawMessage, error) {
+			var in struct{}
+			if err := unmarshalArgs(args, &in); err != nil {
+				return nil, err
+			}
+			var out rpc.MacroSnapshotResult
+			if err := conn.Call(ctx, rpc.MethodMacroSnapshot, in, &out); err != nil {
+				return nil, err
+			}
+			return json.Marshal(out)
+		},
+	},
+	{
 		Name: "canary_regime", Title: "Canary Market Regime",
-		Description:  "Read the detailed broad-market regime: all eight indicators, independent clusters, confirmation eligibility, gamma horizons and skew, source health, and stale or unavailable evidence. Use after canary_brief or for an explicit market-regime question; use canary_stress for how that market state affects the held portfolio. Gamma is a conditional amplification/damping model; open interest does not identify dealer inventory or market direction. Read-only; no history or refresh controls.",
-		JSONSchema:   schemaObject(map[string]json.RawMessage{"include_profiles": json.RawMessage(`{"type":"boolean","description":"Include large gamma profile arrays; false by default. Scalar measurements, thresholds, warnings and freshness are always retained."}`)}, nil),
+		Description:  "Read the detailed broad-market regime: all eight indicators, independent clusters, confirmation eligibility, gamma horizons and skew, source health, and stale or unavailable evidence. Choose view=monitor for a compact dashboard projection or view=full (default) for detailed evidence. Use after canary_brief or for an explicit market-regime question; use canary_stress for how that market state affects the held portfolio. Gamma is a conditional amplification/damping model; open interest does not identify dealer inventory or market direction. Read-only; no history or refresh controls.",
+		JSONSchema:   schemaObject(map[string]json.RawMessage{"view": json.RawMessage(`{"type":"string","enum":["full","monitor"],"description":"full (default) retains detailed evidence; monitor uses the shared compact dashboard projection. monitor cannot include gamma profile arrays."}`), "include_profiles": json.RawMessage(`{"type":"boolean","description":"Include large gamma profile arrays; false by default. Scalar measurements, thresholds, warnings and freshness are always retained."}`)}, nil),
 		ReadOnlyHint: new(true), RPCMethods: []string{rpc.MethodRegimeSnapshot},
 		Handler: func(ctx context.Context, conn *dial.Conn, args json.RawMessage) (json.RawMessage, error) {
 			var in struct {
-				IncludeProfiles bool `json:"include_profiles"`
+				IncludeProfiles bool   `json:"include_profiles"`
+				View            string `json:"view"`
 			}
 			if err := unmarshalArgs(args, &in); err != nil {
 				return nil, err
 			}
+			if in.View != "" && in.View != "full" && in.View != "monitor" {
+				return nil, fmt.Errorf("view must be full or monitor")
+			}
+			if in.View == "monitor" && in.IncludeProfiles {
+				return nil, fmt.Errorf("monitor view cannot include profiles")
+			}
 			var res rpc.RegimeSnapshotResult
 			if err := conn.Call(ctx, rpc.MethodRegimeSnapshot, rpc.RegimeSnapshotParams{}, &res); err != nil {
 				return nil, err
+			}
+			if in.View == "monitor" {
+				return json.Marshal(rpc.CompactRegimeMonitor(&res))
 			}
 			if !in.IncludeProfiles {
 				rpc.StripRegimeGammaProfiles(&res)

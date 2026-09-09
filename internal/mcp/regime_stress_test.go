@@ -113,3 +113,29 @@ func TestStressToolReturnsFullSharedAssessment(t *testing.T) {
 		}
 	}
 }
+
+func TestRegimeMonitorProjectionRetainsUnavailableEligibility(t *testing.T) {
+	want := rpc.RegimeSnapshotResult{AuthorityHealth: &rpc.RegimeAuthorityHealth{Status: rpc.RegimeAuthorityStale, LastSuccessAt: new(time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)), LastSuccessAgeSeconds: new(int64(600))}, VIXTermStructure: rpc.RegimeVIXTerm{Status: "stale", Ratio: new(1.1), RegimeIndicatorMeta: rpc.RegimeIndicatorMeta{Band: "red", Eligibility: &rpc.RegimeEligibility{Eligible: false, Reasons: []string{"stale evidence"}}}}}
+	conn, calls := riskToolConn(t, map[string]any{rpc.MethodRegimeSnapshot: want})
+	tool, _ := lookupTool("canary_regime")
+	for _, args := range []string{`{"view":"other"}`, `{"view":"monitor","include_profiles":true}`} {
+		if _, err := tool.Handler(t.Context(), conn, json.RawMessage(args)); err == nil {
+			t.Fatal("invalid monitor request was accepted")
+		}
+	}
+	raw, err := tool.Handler(t.Context(), conn, json.RawMessage(`{"view":"monitor"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got rpc.RegimeMonitorResult
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+	expectedRaw, _ := json.Marshal(rpc.CompactRegimeMonitor(&want))
+	var expected rpc.RegimeMonitorResult
+	_ = json.Unmarshal(expectedRaw, &expected)
+	if !reflect.DeepEqual(got, expected) || !reflect.DeepEqual(<-calls, []string{rpc.MethodRegimeSnapshot}) {
+		t.Fatal("compact MCP adapter changed authority or dispatched invalid inputs")
+	}
+}

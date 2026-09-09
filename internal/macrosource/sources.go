@@ -1,0 +1,259 @@
+// Package macrosource reads a fixed public economic-calendar and official-news
+// source set. Parsing is independent of broker state and risk policy.
+package macrosource
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/osauer/canary/v2/internal/rpc"
+)
+
+// Spec identifies one fixed public source and its parser.
+type Spec struct{ ID, Name, URL, Kind, Timezone, Coverage string }
+
+// Specs returns the supported sources. Feed coverage is deliberately explicit.
+func Specs() []Spec {
+	return []Spec{
+		{"bls-calendar", "BLS releases", "https://www.bls.gov/schedule/news_release/bls.ics", "ics", "America/New_York", "Scheduled releases in the supplied calendar; not general news"},
+		{"bea-calendar", "BEA releases", "https://apps.bea.gov/API/signup/release_dates.json", "bea", "America/New_York", "Published BEA release dates; revisions replace earlier dates"},
+		{"fed-calendar", "Federal Reserve calendar", "https://www.federalreserve.gov/json/calendar.json", "fed", "America/New_York", "Published speeches, meetings and statistical releases"},
+		{"ecb-calendar", "ECB weekly calendar", "https://www.ecb.europa.eu/press/calendars/weekly/html/index.en.html", "ecb", "Europe/Berlin", "Current published week; literal source times retained when ambiguous"},
+		{"bea-news", "BEA publications", "https://apps.bea.gov/rss/rss.xml", "rss", "America/New_York", "Recent feed items; not exhaustive news coverage"},
+		{"fed-policy", "Fed monetary policy", "https://www.federalreserve.gov/feeds/press_monetary.xml", "rss", "America/New_York", "Recent monetary-policy releases"},
+		{"fed-speeches", "Fed speeches", "https://www.federalreserve.gov/feeds/speeches_and_testimony.xml", "rss", "America/New_York", "Recent speeches and testimony"},
+		{"ecb-news", "ECB publications", "https://www.ecb.europa.eu/rss/press.html", "rss", "Europe/Berlin", "Recent official ECB publications"},
+	}
+}
+
+// Batch is one successful source response, before daemon retention and filtering.
+type Batch struct {
+	Events       []rpc.MacroEvent       `json:"events"`
+	Publications []rpc.MacroPublication `json:"publications"`
+}
+
+// Client sends no credentials or account information to its fixed public hosts.
+type Client struct{ HTTP *http.Client }
+
+// NewClient constructs a bounded transport; redirects must stay on approved hosts.
+func NewClient() *Client {
+	return &Client{HTTP: &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 4 || !SafeURL(req.URL.String()) {
+			return errors.New("public source redirect refused")
+		}
+		return nil
+	}}}
+}
+
+// SafeURL permits only HTTPS URLs on the explicit official source hosts.
+func SafeURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.User != nil || u.Port() != "" {
+		return false
+	}
+	switch strings.ToLower(u.Hostname()) {
+	case "www.bls.gov", "www.bea.gov", "apps.bea.gov", "www.federalreserve.gov", "www.ecb.europa.eu":
+		return true
+	}
+	return false
+}
+
+// Fetch reads one feed without modifying daemon or broker state.
+func (c *Client) Fetch(ctx context.Context, s Spec, now time.Time) (Batch, error) {
+	if !SafeURL(s.URL) {
+		return Batch{}, errors.New("public source host refused")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.URL, nil)
+	if err != nil {
+		return Batch{}, err
+	}
+	req.Header.Set("User-Agent", "Canary-public-feeds/1.0")
+	req.Header.Set("Accept", "text/calendar, application/rss+xml, application/json, application/xml, text/html")
+	res, err := c.HTTP.Do(req)
+	if err != nil {
+		return Batch{}, errors.New("public source request failed")
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		return Batch{}, fmt.Errorf("source returned HTTP %d", res.StatusCode)
+	}
+	b, err := io.ReadAll(io.LimitReader(res.Body, (2<<20)+1))
+	if err != nil {
+		return Batch{}, errors.New("public source read failed")
+	}
+	if len(b) > 2<<20 {
+		return Batch{}, errors.New("public source exceeds size limit")
+	}
+	return Parse(s, b, now)
+}
+func identity(values ...string) string {
+	sum := sha256.Sum256([]byte(strings.Join(values, "\x00")))
+	return hex.EncodeToString(sum[:12])
+}
+func tidy(v string) string {
+	v = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, v)
+	v = strings.Join(strings.Fields(v), " ")
+	runes := []rune(v)
+	if len(runes) > 500 {
+		v = string(runes[:500])
+	}
+	return v
+}
+
+func sourceLink(s Spec, raw string) bool {
+	if !SafeURL(raw) {
+		return false
+	}
+	link, _ := url.Parse(raw)
+	feed, _ := url.Parse(s.URL)
+	if link.Hostname() == feed.Hostname() {
+		return true
+	}
+	return (feed.Hostname() == "apps.bea.gov" || feed.Hostname() == "www.bea.gov") && (link.Hostname() == "apps.bea.gov" || link.Hostname() == "www.bea.gov")
+}
+
+func eventID(s Spec, e rpc.MacroEvent) string {
+	return identity(s.ID, e.Title, e.Date, e.TimeLabel, e.ScheduledAt.Format(time.RFC3339Nano))
+}
+func publicationID(s Spec, p rpc.MacroPublication) string {
+	return identity(s.ID, p.SourceURL, p.Title, p.PublishedAt.Format(time.RFC3339Nano))
+}
+
+// ValidateBatch checks source identity, clocks and date precision before a
+// parsed or restored feed can replace retained public evidence.
+func ValidateBatch(s Spec, batch Batch, now time.Time) error {
+	loc, err := time.LoadLocation(s.Timezone)
+	if err != nil || !SafeURL(s.URL) || s.ID == "" || now.IsZero() {
+		return errors.New("invalid public source specification")
+	}
+	if len(batch.Events)+len(batch.Publications) == 0 || len(batch.Events) > 10000 || len(batch.Publications) > 2000 {
+		return errors.New("public source record count invalid")
+	}
+	if s.Kind == "rss" && len(batch.Events) != 0 || s.Kind != "rss" && len(batch.Publications) != 0 {
+		return errors.New("public source record kind invalid")
+	}
+	seen := map[string]bool{}
+	validText := func(v string) bool { return utf8.ValidString(v) && v == tidy(v) && len([]rune(v)) <= 500 }
+	for _, e := range batch.Events {
+		if e.SourceID != s.ID || e.SourceURL != s.URL || e.Timezone != s.Timezone || e.Title == "" || !validText(e.Title) || !validText(e.Category) || !validText(e.TimeLabel) || e.RetrievedAt.IsZero() || e.RetrievedAt.After(now.Add(time.Minute)) {
+			return errors.New("calendar provenance invalid")
+		}
+		if _, err := time.Parse(time.DateOnly, e.Date); err != nil {
+			return errors.New("calendar date invalid")
+		}
+		switch e.TimePrecision {
+		case "instant":
+			if e.ScheduledAt.IsZero() || e.Date != e.ScheduledAt.In(loc).Format(time.DateOnly) {
+				return errors.New("calendar instant and source date disagree")
+			}
+		case "date":
+			if !e.ScheduledAt.IsZero() || e.TimeLabel != "" {
+				return errors.New("calendar date precision invalid")
+			}
+		case "source_label":
+			if !e.ScheduledAt.IsZero() || e.TimeLabel == "" {
+				return errors.New("calendar source time invalid")
+			}
+		default:
+			return errors.New("calendar time precision invalid")
+		}
+		if e.ID != eventID(s, e) || seen[e.ID] {
+			return errors.New("calendar record identity invalid")
+		}
+		seen[e.ID] = true
+	}
+	for _, p := range batch.Publications {
+		if p.SourceID != s.ID || !sourceLink(s, p.SourceURL) || p.Title == "" || !validText(p.Title) || p.RetrievedAt.IsZero() || p.RetrievedAt.After(now.Add(time.Minute)) || p.PublishedAt.After(p.RetrievedAt.Add(time.Minute)) {
+			return errors.New("publication provenance invalid")
+		}
+		if p.ID != publicationID(s, p) || seen[p.ID] {
+			return errors.New("publication record identity invalid")
+		}
+		seen[p.ID] = true
+	}
+	return nil
+}
+
+// Parse preserves source dates and rejects malformed feeds instead of clearing
+// previously retained records. It never fetches links carried inside a feed.
+func Parse(s Spec, b []byte, now time.Time) (Batch, error) {
+	var out Batch
+	var err error
+	switch s.Kind {
+	case "ics":
+		out, err = parseICS(s, string(b), now)
+	case "bea":
+		out, err = parseBEA(s, b, now)
+	case "fed":
+		out, err = parseFed(s, b, now)
+	case "ecb":
+		out, err = parseECB(s, b, now)
+	case "rss":
+		out, err = parseRSS(s, b, now)
+	default:
+		err = errors.New("unknown public source format")
+	}
+	if err != nil {
+		return Batch{}, err
+	}
+	if len(out.Events)+len(out.Publications) == 0 {
+		return Batch{}, errors.New("source supplied no usable records")
+	}
+	loc, err := time.LoadLocation(s.Timezone)
+	if err != nil {
+		return Batch{}, errors.New("public source timezone invalid")
+	}
+	events := make([]rpc.MacroEvent, 0, len(out.Events))
+	seen := map[string]bool{}
+	for _, e := range out.Events {
+		e.SourceID = s.ID
+		e.SourceURL = s.URL
+		e.Timezone = s.Timezone
+		e.RetrievedAt = now
+		e.Title = plain(e.Title)
+		e.Category = plain(e.Category)
+		e.TimeLabel = plain(e.TimeLabel)
+		if !e.ScheduledAt.IsZero() {
+			e.Date = e.ScheduledAt.In(loc).Format(time.DateOnly)
+		}
+		if e.TimePrecision == "date" && e.TimeLabel != "" {
+			e.TimePrecision = "source_label"
+		}
+		e.ID = eventID(s, e)
+		if !seen[e.ID] {
+			events = append(events, e)
+			seen[e.ID] = true
+		}
+	}
+	publications := make([]rpc.MacroPublication, 0, len(out.Publications))
+	for _, p := range out.Publications {
+		p.SourceID = s.ID
+		p.RetrievedAt = now
+		p.Title = plain(p.Title)
+		p.ID = publicationID(s, p)
+		if !seen[p.ID] {
+			publications = append(publications, p)
+			seen[p.ID] = true
+		}
+	}
+	out = Batch{Events: events, Publications: publications}
+	if err := ValidateBatch(s, out, now); err != nil {
+		return Batch{}, err
+	}
+	return out, nil
+}

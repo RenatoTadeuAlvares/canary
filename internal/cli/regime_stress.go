@@ -16,11 +16,18 @@ func runRegime(ctx context.Context, env *Env, args []string) int {
 	jsonOut := fs.Bool("json", false, "emit the detailed typed regime snapshot")
 	explain := fs.Bool("explain", false, "include served thresholds, confirmation reasons, and source health")
 	profiles := fs.Bool("profiles", false, "include large gamma profile arrays in JSON")
+	view := fs.String("view", "full", "full detail (default) or monitor dashboard projection; monitor requires --json")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
 	if fs.NArg() != 0 {
 		return failUnexpectedArgs(env, fs)
+	}
+	if *view != "full" && *view != "monitor" {
+		return fail(env, "regime: --view must be full or monitor")
+	}
+	if *view == "monitor" && (!*jsonOut || *profiles || *explain) {
+		return fail(env, "regime: --view monitor requires --json and cannot combine with --profiles or --explain")
 	}
 	if *profiles && !*jsonOut {
 		return fail(env, "regime: --profiles requires --json")
@@ -30,6 +37,9 @@ func runRegime(ctx context.Context, env *Env, args []string) int {
 		return fail(env, "regime: %v", err)
 	}
 	if *jsonOut {
+		if *view == "monitor" {
+			return printJSON(env, rpc.CompactRegimeMonitor(&res))
+		}
 		if !*profiles {
 			rpc.StripRegimeGammaProfiles(&res)
 		}

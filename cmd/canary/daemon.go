@@ -17,6 +17,10 @@ import (
 	"github.com/osauer/canary/v2/internal/productidentity"
 )
 
+// daemonMacroSources is overridden only by the hermetic integration binary.
+// Production builds always start the daemon-owned public feed collectors.
+var daemonMacroSources = "enabled"
+
 func runDaemon(args []string) {
 	fs := flag.NewFlagSet(productidentity.Executable+" daemon", flag.ExitOnError)
 	cfgPath := fs.String("config", "", "config file path (default $XDG_CONFIG_HOME/ibkr/config.toml)")
@@ -69,10 +73,11 @@ func runDaemon(args []string) {
 	logger := daemon.NewLogger(logWriter, resolved.Daemon.LogLevel)
 
 	srv := daemon.New(daemon.Options{
-		Config:     resolved,
-		SocketPath: socketPath,
-		Version:    effectiveVersion(),
-		Logger:     logger,
+		DisableMacroSources: daemonMacroSources == "disabled",
+		Config:              resolved,
+		SocketPath:          socketPath,
+		Version:             effectiveVersion(),
+		Logger:              logger,
 	})
 	defer srv.Stop()
 

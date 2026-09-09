@@ -209,7 +209,7 @@ func buildBin() (string, error) {
 		return "", err
 	}
 	out := filepath.Join(dir, "canary")
-	ldflags := fmt.Sprintf("-X main.cliUnaryTimeout=%s -X main.cliLongUnaryTimeout=%s", integrationCLIUnaryTimeoutText, integrationCLILongTimeoutText)
+	ldflags := fmt.Sprintf("-X main.cliUnaryTimeout=%s -X main.cliLongUnaryTimeout=%s -X main.daemonMacroSources=disabled", integrationCLIUnaryTimeoutText, integrationCLILongTimeoutText)
 	cmd := exec.Command("go", "build", "-ldflags", ldflags, "-o", out, "../../cmd/canary")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
