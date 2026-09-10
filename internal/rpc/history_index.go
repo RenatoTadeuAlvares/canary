@@ -1233,6 +1233,12 @@ type StressInput struct {
 // alert identity for monitors; SourceFingerprints records the classified
 // upstream state the stress read consumed.
 type StressResult struct {
+	// AccountScope binds the constituent account and positions when both carry
+	// current, available, matching authority. Nil means the result cannot be
+	// assigned to an account; semantic fingerprints are not scope identities.
+	AccountScope *AccountDataScope `json:"account_scope,omitempty"`
+	// AccountScopeIssue explains an absent scope without exposing account IDs.
+	AccountScopeIssue  string                   `json:"account_scope_issue,omitempty"`
 	AsOf               time.Time                `json:"as_of"`
 	SourceAsOf         StressSourceAsOf         `json:"source_as_of,omitzero"`
 	Fingerprint        Fingerprint              `json:"fingerprint"`

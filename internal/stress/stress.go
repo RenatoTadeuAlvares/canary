@@ -99,6 +99,7 @@ func computeStress(in StressInput, now time.Time, sourceIssues []stressSourceIss
 		MarketIndicators:   stressMarketIndicators(in.Regime, now),
 		NotExecution:       "Read-only stress snapshot; no orders are placed by Canary.",
 	}
+	res.AccountScope, res.AccountScopeIssue = stressAccountScope(in)
 	rows := []StressRow{
 		stressMarginRow(res.Portfolio),
 		stressPnLShockRow(res.Portfolio),
@@ -139,6 +140,21 @@ func computeStress(in StressInput, now time.Time, sourceIssues []stressSourceIss
 	}
 	res.Fingerprint = rpc.BuildStressFingerprint(&res)
 	return res
+}
+
+func stressAccountScope(in StressInput) (*rpc.AccountDataScope, string) {
+	a, p := in.Account.Authority, in.Positions.Authority
+	if a == nil || p == nil || a.Availability != rpc.AccountDataAvailable || p.Availability != rpc.AccountDataAvailable || a.Freshness != rpc.AccountDataFreshnessCurrent || p.Freshness != rpc.AccountDataFreshnessCurrent {
+		return nil, "Account or positions authority is unavailable or not current."
+	}
+	scope := a.Scope
+	if strings.TrimSpace(scope.AccountID) == "" || strings.EqualFold(scope.AccountID, "All") || (scope.AccountMode != "paper" && scope.AccountMode != "live") {
+		return nil, "Account identity or mode is unresolved."
+	}
+	if scope != p.Scope {
+		return nil, "Account and positions refer to different scopes."
+	}
+	return &scope, ""
 }
 
 // stressRelevantMarketEventsFingerprint applies the same exposure boundary as
