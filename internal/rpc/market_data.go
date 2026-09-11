@@ -41,21 +41,33 @@ type MarketHistoryPoint struct {
 	Volume *int64    `json:"volume,omitempty"`
 }
 
+// MarketSessionRange is one completed US equity session's regular-hours trade
+// bar. Contract, acquisition time and source belong to the enclosing history.
+type MarketSessionRange struct {
+	Date  string  `json:"date"`
+	High  float64 `json:"high"`
+	Low   float64 `json:"low"`
+	Close float64 `json:"close"`
+}
+
 // MarketHistoryResult preserves actual acquisition, range and pricing basis.
 type MarketHistoryResult struct {
-	TimestampKind    string               `json:"timestamp_kind"`
-	PriceBasis       string               `json:"price_basis"`
-	RegularHoursOnly bool                 `json:"regular_hours_only"`
-	RequestedStart   time.Time            `json:"requested_start"`
-	Contract         ContractParams       `json:"contract"`
-	Range            string               `json:"range"`
-	Interval         string               `json:"interval"`
-	Source           string               `json:"source"`
-	AsOf             time.Time            `json:"as_of"`
-	Start            time.Time            `json:"start"`
-	End              time.Time            `json:"end"`
-	Points           []MarketHistoryPoint `json:"points"`
-	Reference        *float64             `json:"reference,omitempty"`
-	ReferenceName    string               `json:"reference_name,omitempty"`
-	CoverageStatus   string               `json:"coverage_status"`
+	// LastCompletedSession is absent without a valid daily bar for the exact
+	// latest completed session, or when this instrument's calendar is unsupported.
+	LastCompletedSession *MarketSessionRange  `json:"last_completed_session,omitempty"`
+	TimestampKind        string               `json:"timestamp_kind"`
+	PriceBasis           string               `json:"price_basis"`
+	RegularHoursOnly     bool                 `json:"regular_hours_only"`
+	RequestedStart       time.Time            `json:"requested_start"`
+	Contract             ContractParams       `json:"contract"`
+	Range                string               `json:"range"`
+	Interval             string               `json:"interval"`
+	Source               string               `json:"source"`
+	AsOf                 time.Time            `json:"as_of"`
+	Start                time.Time            `json:"start"`
+	End                  time.Time            `json:"end"`
+	Points               []MarketHistoryPoint `json:"points"`
+	Reference            *float64             `json:"reference,omitempty"`
+	ReferenceName        string               `json:"reference_name,omitempty"`
+	CoverageStatus       string               `json:"coverage_status"`
 }

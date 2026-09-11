@@ -6,9 +6,11 @@ import (
 	"errors"
 	ibkrlib "github.com/osauer/canary/v2/pkg/ibkr"
 	"math"
+	"slices"
 	"sync"
 	"time"
 
+	"github.com/osauer/canary/v2/internal/marketcal"
 	"github.com/osauer/canary/v2/internal/rpc"
 )
 
@@ -195,6 +197,7 @@ func (s *Server) fetchMarketHistory(ctx context.Context, req *rpc.Request) (*rpc
 	}
 	result.PriceBasis = series.WhatToShow
 	result.RegularHoursOnly = interval == "1 day"
+	result.LastCompletedSession = completedEquityRange(series, interval, now)
 	result.RequestedStart = marketHistoryStart(p.Range, now)
 	if len(bars) > 2000 {
 		return nil, errors.New("history exceeds bounded series size")
@@ -226,6 +229,31 @@ func (s *Server) fetchMarketHistory(ctx context.Context, req *rpc.Request) (*rpc
 	result.Start = result.Points[0].At
 	result.End = result.Points[len(result.Points)-1].At
 	return result, nil
+}
+
+func completedEquityRange(series ibkrlib.ChartSeries, interval string, now time.Time) *rpc.MarketSessionRange {
+	c := series.Contract
+	if interval != "1 day" || series.WhatToShow != "TRADES" || c.ConID <= 0 || c.SecType != "STK" || c.Currency != "USD" ||
+		!slices.Contains([]string{"NYSE", "NASDAQ", "ARCA", "AMEX", "BATS", "IEX", "ISLAND", "NASDAQ.NMS"}, c.PrimaryExch) {
+		return nil
+	}
+	session, _, ok := lastCompletedMarketSessionWindow(now, marketcal.MarketUSEquity)
+	if !ok {
+		return nil
+	}
+	for _, bar := range series.Bars {
+		// Daily bar timestamps are session dates, not acquisition instants.
+		if bar.Time.Format(time.DateOnly) != session.Date {
+			continue
+		}
+		if bar.Low <= 0 || bar.High < bar.Low || bar.Close < bar.Low || bar.Close > bar.High ||
+			math.IsNaN(bar.Low) || math.IsNaN(bar.High) || math.IsNaN(bar.Close) ||
+			math.IsInf(bar.Low, 0) || math.IsInf(bar.High, 0) || math.IsInf(bar.Close, 0) {
+			return nil
+		}
+		return &rpc.MarketSessionRange{Date: session.Date, High: bar.High, Low: bar.Low, Close: bar.Close}
+	}
+	return nil
 }
 
 func marketHistoryStart(r string, now time.Time) time.Time {

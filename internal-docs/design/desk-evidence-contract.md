@@ -32,3 +32,13 @@ Related contracts that Desk must preserve:
 The scope regression exercises absent, stale, aggregate, conflicting and matching
 authority with synthetic inputs. No installed daemon, broker state, build flag,
 freeze or trading setting is changed by this source work.
+
+## Last completed session range
+
+Daily `market.history` responses can include `last_completed_session` with the
+source bar's high, low, close and date. It uses the existing US equity calendar
+and exact resolved contract, and is absent for unsupported exchanges, midpoint
+prices, missing completed-session bars or invalid ranges. The enclosing result
+carries acquisition time and price basis. Desk can request the bounded `1M`
+series when today's range is unavailable and label this range by its actual date;
+rolling intraday closes are not a substitute for a session's high and low.
