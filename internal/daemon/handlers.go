@@ -682,6 +682,7 @@ func (s *Server) prewarmStockQuoteSummaries(ctx context.Context, c *ibkrlib.Conn
 		p.QuotePrice = q.QuotePrice
 		p.QuotePriceSource = q.QuotePriceSource
 		p.QuotePriceAt = q.QuotePriceAt
+		p.TradeAt = q.TradeAt
 		p.QuotePriceAsOf = q.QuotePriceAsOf
 		p.QuoteChange = q.QuoteChange
 		p.QuoteChangePct = q.QuoteChangePct
@@ -2247,6 +2248,7 @@ func fillQuoteMarketData(q *rpc.Quote, d *ibkrlib.MarketData) {
 		q.IV = &v
 		q.IVStatus = "model"
 	}
+	q.TradeAt = d.LastTradeTime
 	if !d.LastTradeTime.IsZero() {
 		q.PriceAt = d.LastTradeTime
 		q.QuotePriceAt = d.LastTradeTime

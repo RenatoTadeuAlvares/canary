@@ -1578,16 +1578,19 @@ type Quote struct {
 	// current indication, otherwise RegularClose. PriceSource names the
 	// selected input so consumers can avoid treating a close-only fallback
 	// as a live last trade.
-	Price               *float64  `json:"price,omitempty"`
-	PriceSource         string    `json:"price_source,omitempty"`
-	RegularClose        *float64  `json:"regular_close,omitempty"`
-	RegularCloseAt      time.Time `json:"regular_close_at,omitzero"`
-	PriorRegularClose   *float64  `json:"prior_regular_close,omitempty"`
-	RegularChange       *float64  `json:"regular_change,omitempty"`
-	RegularChangePct    *float64  `json:"regular_change_pct,omitempty"`
-	QuotePrice          *float64  `json:"quote_price,omitempty"`
-	QuotePriceSource    string    `json:"quote_price_source,omitempty"`
-	QuotePriceAt        time.Time `json:"quote_price_at,omitzero"`
+	Price             *float64  `json:"price,omitempty"`
+	PriceSource       string    `json:"price_source,omitempty"`
+	RegularClose      *float64  `json:"regular_close,omitempty"`
+	RegularCloseAt    time.Time `json:"regular_close_at,omitzero"`
+	PriorRegularClose *float64  `json:"prior_regular_close,omitempty"`
+	RegularChange     *float64  `json:"regular_change,omitempty"`
+	RegularChangePct  *float64  `json:"regular_change_pct,omitempty"`
+	QuotePrice        *float64  `json:"quote_price,omitempty"`
+	QuotePriceSource  string    `json:"quote_price_source,omitempty"`
+	QuotePriceAt      time.Time `json:"quote_price_at,omitzero"`
+	// TradeAt is the broker-reported last-trade time, never a local receipt.
+	// Zero means IBKR did not supply a trade timestamp.
+	TradeAt             time.Time `json:"trade_at,omitzero"`
 	QuotePriceAsOf      string    `json:"quote_price_as_of,omitempty"`
 	QuoteChange         *float64  `json:"quote_change,omitempty"`
 	QuoteChangePct      *float64  `json:"quote_change_pct,omitempty"`
@@ -1692,12 +1695,15 @@ type PositionView struct {
 	QuotePrice        *float64  `json:"quote_price,omitempty"`
 	QuotePriceSource  string    `json:"quote_price_source,omitempty"`
 	QuotePriceAt      time.Time `json:"quote_price_at,omitzero"`
-	QuotePriceAsOf    string    `json:"quote_price_as_of,omitempty"`
-	QuoteChange       *float64  `json:"quote_change,omitempty"`
-	QuoteChangePct    *float64  `json:"quote_change_pct,omitempty"`
-	PrevClose         *float64  `json:"prev_close,omitempty"`
-	Bid               *float64  `json:"bid,omitempty"`
-	Ask               *float64  `json:"ask,omitempty"`
+	// TradeAt is the broker-reported last-trade time, never a local receipt.
+	// Zero means IBKR did not supply a trade timestamp.
+	TradeAt        time.Time `json:"trade_at,omitzero"`
+	QuotePriceAsOf string    `json:"quote_price_as_of,omitempty"`
+	QuoteChange    *float64  `json:"quote_change,omitempty"`
+	QuoteChangePct *float64  `json:"quote_change_pct,omitempty"`
+	PrevClose      *float64  `json:"prev_close,omitempty"`
+	Bid            *float64  `json:"bid,omitempty"`
+	Ask            *float64  `json:"ask,omitempty"`
 	// DayChange is per-share for stocks (Mark − stock prev close); for
 	// populated. nil when any input is missing — never fabricated.
 	DayChange      *float64      `json:"day_change,omitempty"`
