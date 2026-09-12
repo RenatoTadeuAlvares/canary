@@ -1347,6 +1347,7 @@ const (
 	msgContractDataEnd                        = 52
 	msgOpenOrderEnd                           = 53
 	msgAcctDownloadEnd                        = 54
+	msgExecDetailsEnd                         = 55
 	msgDeltaNeutralValidation                 = 56
 	msgTickSnapshotEnd                        = 57
 	msgMarketDataType                         = 58
@@ -1401,6 +1402,7 @@ const (
 	cancelOrder                 = 4
 	reqOpenOrders               = 5
 	reqAcctData                 = 6
+	reqExecutions               = 7
 	reqIds                      = 8
 	reqContractData             = 9
 	reqMktDepth                 = 10
@@ -1999,6 +2001,7 @@ func (c *Connection) processMessageAtEpoch(msgBytes []byte, epoch uint64) {
 		// The timestamp is available in fields[1] if needed for debugging
 	case msgPosition:
 		c.handlePosition(fields)
+		c.dispatchHandlers(msgID, fields, epoch)
 	case msgPositionEnd:
 		portfolioLogger.Infof("Position sync complete")
 		c.completePositionsSnapshot()
@@ -2008,6 +2011,7 @@ func (c *Connection) processMessageAtEpoch(msgBytes []byte, epoch uint64) {
 		default:
 			// Channel already has a signal
 		}
+		c.dispatchHandlers(msgID, fields, epoch)
 	case msgAccountSummary:
 		c.handleAccountSummaryUnderBrokerScopeLease(fields)
 	case msgAccountSummaryEnd:

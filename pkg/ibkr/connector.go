@@ -138,6 +138,9 @@ type Connector struct {
 	openOrderSnapshotPoison     openOrderSnapshotBinding
 	openOrderSnapshotTimeout    time.Duration
 	openOrderSnapshotBeforeSend func()
+	// positionSnapshotMu serializes reqPositions because its protocol stream has
+	// no request ID and a late positionEnd cannot be attributed to a later read.
+	positionSnapshotMu sync.Mutex
 
 	// orderStatusLogSig dedupes the high-frequency order-status log line.
 	// IBKR re-sends orderStatus frames for unchanged working orders many
