@@ -602,14 +602,19 @@ func (e *proposalEngine) generate(ctx context.Context, policy protectionPolicy, 
 			strategyLegs, ambiguousStrategies := optionExitStrategyScope(pos)
 			rulebookPolicy := risk.DefaultRulebookPolicy()
 			for _, row := range pos.Options {
-				intent, declared := intents[row.ConID]
-				if !declared {
+				if row.Quantity == 0 {
 					continue
 				}
-				exactRow := e.optionExitExactQuote(ctx, row)
+				intent, declared := intents[row.ConID]
+				intentCurrent := declared && !now.Before(intent.ApprovedAt) && now.Before(intent.ExpiresAt)
+				exactRow := optionExitWithoutQuote(row)
+				// Missing intent still creates review work, without spending a
+				// broker quote request on a contract that cannot yet qualify.
+				if intentCurrent && row.Quantity > 0 {
+					exactRow = e.optionExitExactQuote(ctx, row)
+				}
 				standalone := !strategyLegs[row.ConID] && !ambiguousStrategies[strings.ToUpper(strings.TrimSpace(row.Symbol))]
 				roleAllowed, economicRole := optionExitEconomicRole(row, rulebookPolicy)
-				intentCurrent := !now.Before(intent.ApprovedAt) && now.Before(intent.ExpiresAt)
 				decision := evaluateOptionExit(policy.Buckets.TrailingStop.Options, exactRow, now, intentCurrent, standalone, roleAllowed, rulebookPolicy.ExitActLossPct)
 				if decision.Action == "" && len(decision.Blockers) == 0 {
 					continue
@@ -1075,7 +1080,7 @@ func optionExitProposal(policy protectionPolicy, status rpc.ProtectionPolicyStat
 		qty, remainder = closeReduceQuantity(row.Quantity)
 	}
 	bucket, reason := rpc.TradeProposalBucketOptionExitReview,
-		"directional option exit cannot be measured from current exact-contract evidence"
+		"option exit needs review; current intent or exact-contract evidence is incomplete"
 	switch decision.Action {
 	case risk.OptionExitActionLoss:
 		bucket = rpc.TradeProposalBucketOptionLossExit
@@ -1084,13 +1089,17 @@ func optionExitProposal(policy protectionPolicy, status rpc.ProtectionPolicyStat
 		bucket = rpc.TradeProposalBucketTrailingStop
 		reason = fmt.Sprintf("directional option gained %.1f%% versus cost; profit trail armed at %.1f%%", decision.ReturnPct, cfg.ProfitArmGainPct)
 	}
-	p := baseProposal(policy, status, sources, now, bucket, row, rpc.OrderActionSell, qty, rpc.OrderPositionEffectClose, reason)
+	action := rpc.OrderActionSell
+	if row.Quantity < 0 {
+		action = rpc.OrderActionBuy
+	}
+	p := baseProposal(policy, status, sources, now, bucket, row, action, qty, rpc.OrderPositionEffectClose, reason)
 	p.Contract.MinTick = minTick
 	p.TIF = cfg.effectiveTIF()
 	p.LimitPrice = nil
 	p.Score = math.Abs(row.MarketValue)
 	p.OptionExit = &rpc.TradeProposalOptionExit{
-		Kind: nonEmptyString(decision.Action, "review"), Intent: "directional", EconomicRole: economicRole,
+		Kind: nonEmptyString(decision.Action, "review"), Intent: optionExitIntentState(cfg, row.ConID, now), EconomicRole: economicRole,
 		DTE: optionExitDTE(row, now), MinDTE: cfg.MinDTE, LossExitPct: lossExitPct, ProfitArmGainPct: cfg.ProfitArmGainPct,
 		LockedGainPct: cfg.LockedGainPct, ProfitTrailPct: cfg.DefaultPct, MinTrailPct: cfg.MinPct,
 		MaxTrailPct: cfg.MaxPct, MaxSpreadPctOfMid: cfg.MaxSpreadPctOfMid, MinTrailAbs: cfg.MinTrailAbs,
@@ -1101,16 +1110,18 @@ func optionExitProposal(policy protectionPolicy, status rpc.ProtectionPolicyStat
 	}
 	if decision.ReferencePrice > 0 && !math.IsNaN(decision.ReferencePrice) && !math.IsInf(decision.ReferencePrice, 0) {
 		p.OptionExit.ReferencePrice = cloneFloat64Ptr(&decision.ReferencePrice)
-		p.OptionExit.ReturnPct = cloneFloat64Ptr(&decision.ReturnPct)
+		if decision.Action != "" {
+			p.OptionExit.ReturnPct = cloneFloat64Ptr(&decision.ReturnPct)
+		}
 	}
 	if remainder > 0 || qty <= 0 {
-		proposalBlock(&p, "whole_contract_quantity_required", "option exits require a positive whole-contract position quantity")
+		optionExitBlock(&p, "whole_contract_quantity_required", "option exits require a positive whole-contract position quantity")
 	}
 	for _, code := range decision.Blockers {
-		proposalBlock(&p, code, optionExitBlockerMessage(code, cfg))
+		optionExitBlock(&p, code, optionExitBlockerMessage(code, cfg))
 	}
 	if decision.Action == "" {
-		proposalBlock(&p, "option_exit_measurement_unavailable", "exact-contract option exit evidence is incomplete; no threshold or order may be inferred")
+		optionExitBlock(&p, "option_exit_measurement_unavailable", "exact-contract option exit evidence is incomplete; no threshold or order may be inferred")
 		p.LimitPrice = nil
 		return p, true
 	}
@@ -1133,10 +1144,10 @@ func optionExitProposal(policy protectionPolicy, status rpc.ProtectionPolicyStat
 		p.OptionExit.InitialLockedGainPct = cloneFloat64Ptr(&initialLockPct)
 	}
 	if p.Trail == nil || !risk.OptionExitLockedGainMet(decision.CostPremium, p.Trail.InitialStopPrice, cfg.LockedGainPct) {
-		proposalBlock(&p, "option_trail_locked_gain_not_met", fmt.Sprintf("rounded initial stop must retain at least %.1f%% over cost; wider spread/tick floors cannot weaken that invariant", cfg.LockedGainPct))
+		optionExitBlock(&p, "option_trail_locked_gain_not_met", fmt.Sprintf("rounded initial stop must retain at least %.1f%% over cost; wider spread/tick floors cannot weaken that invariant", cfg.LockedGainPct))
 	}
 	if !risk.OptionExitTrailPctWithinBounds(decision.ReferencePrice, trailAmount, cfg.MinPct, cfg.MaxPct) {
-		proposalBlock(&p, "option_trail_outside_policy_bounds", fmt.Sprintf("rounded premium trail must stay within the %.1f%% to %.1f%% approved range", cfg.MinPct, cfg.MaxPct))
+		optionExitBlock(&p, "option_trail_outside_policy_bounds", fmt.Sprintf("rounded premium trail must stay within the %.1f%% to %.1f%% approved range", cfg.MinPct, cfg.MaxPct))
 	}
 	p.TrailSizing = &rpc.TradeProposalTrailSizing{
 		Method: "option-profit-lock-v1", Version: "option-profit-lock-v1", SelectedBy: optionTrailSelectedBy(cfg, decision),
@@ -1353,14 +1364,7 @@ func optionExitEconomicRole(row rpc.PositionView, pol risk.RulebookPolicy) (bool
 // This keeps SPX/SPXW and other trading-class distinctions exact and carries
 // the broker tick receipt time into the decision row.
 func (e *proposalEngine) optionExitExactQuote(ctx context.Context, row rpc.PositionView) rpc.PositionView {
-	row.OptionBid = nil
-	row.OptionAsk = nil
-	row.DataType = ""
-	row.PriceAt = time.Time{}
-	row.PriceAsOf = ""
-	row.Stale = true
-	row.StaleReason = "exact option quote unavailable"
-	row.SessionContext = nil
+	row = optionExitWithoutQuote(row)
 	if e == nil || e.server == nil || row.ConID <= 0 {
 		return row
 	}
@@ -1383,6 +1387,18 @@ func (e *proposalEngine) optionExitExactQuote(ctx context.Context, row rpc.Posit
 	row.Stale = quote.Stale
 	row.StaleReason = quote.StaleReason
 	row.SessionContext = quote.SessionContext
+	return row
+}
+
+func optionExitWithoutQuote(row rpc.PositionView) rpc.PositionView {
+	row.OptionBid = nil
+	row.OptionAsk = nil
+	row.DataType = ""
+	row.PriceAt = time.Time{}
+	row.PriceAsOf = ""
+	row.Stale = true
+	row.StaleReason = "exact option quote unavailable"
+	row.SessionContext = nil
 	return row
 }
 
@@ -1419,12 +1435,57 @@ func optionExitDTE(row rpc.PositionView, now time.Time) int {
 	return -1
 }
 
+func optionExitIntentState(cfg protectionTrailOptionPolicy, conID int, now time.Time) string {
+	for _, intent := range cfg.DirectionalIntents {
+		if intent.ConID == conID && conID > 0 && !now.Before(intent.ApprovedAt) && now.Before(intent.ExpiresAt) {
+			return "directional"
+		}
+	}
+	return "unconfirmed"
+}
+
+func optionExitBlock(p *rpc.TradeProposal, code, message string) {
+	proposalBlock(p, code, message)
+	for i := range p.Blockers {
+		if p.Blockers[i].Code == code {
+			p.Blockers[i].Action = optionExitBlockerAction(code)
+		}
+	}
+}
+
+func optionExitBlockerAction(code string) string {
+	switch code {
+	case "directional_intent_required":
+		return "Operator: confirm whether this exact option is a directional trade or portfolio protection; record directional intent only if that is its actual purpose."
+	case "standalone_option_required":
+		return "Operator: review the legs together. Canary must resolve strategy grouping before proposing a single-leg exit; a directional declaration alone does not resolve grouping."
+	case "directional_role_not_confirmed":
+		return "Canary needs fresh broker Greeks tied to each exact contract and a complete portfolio exposure check. Shared Greeks or another intent approval cannot clear this blocker."
+	case "long_option_required":
+		return "Review this short option through the strategy or short-position workflow; the approved option exit policy covers long positions only."
+	case "exact_contract_required", "whole_contract_quantity_required", "option_cost_basis_unavailable", "option_numeric_input_invalid":
+		return "Refresh broker positions and resolve the missing or invalid contract, quantity or cost evidence before considering an exit."
+	case "live_option_quote_required", "fresh_option_quote_required", "two_sided_option_quote_required", "option_spread_too_wide":
+		return "Once intent is current, refresh during the listed-options session with live two-sided quotes for this exact contract. Canary must verify freshness and spread."
+	case "option_rth_closed":
+		return "Re-evaluate when the regular listed-options session opens; a closed-market review does not establish an executable exit."
+	case "option_exit_min_dte":
+		return "Review expiry and the existing near-expiry workflow; do not apply the longer-dated option trail below its approved minimum DTE."
+	case "option_trail_outside_policy_bounds", "option_trail_locked_gain_not_met":
+		return "Review an alternative exit. Current spread and tick constraints cannot produce the approved profit trail; do not widen its limits automatically."
+	case "option_exit_policy_invalid":
+		return "Correct the invalid option policy before refreshing proposals; do not substitute unapproved numeric defaults."
+	default:
+		return "Resolve the specific blockers above and refresh proposals. This review row is not a measured action, a working stop or permission to trade."
+	}
+}
+
 func optionExitBlockerMessage(code string, cfg protectionTrailOptionPolicy) string {
 	switch code {
 	case "exact_contract_required":
 		return "option exits require a positive exact broker contract id"
 	case "directional_intent_required":
-		return "option exit requires explicit exact-contract directional intent"
+		return "option purpose is not confirmed by a current exact-contract directional declaration (missing, future or expired)"
 	case "standalone_option_required":
 		return "option belongs to or may belong to a multi-leg strategy; close it through the strategy workflow"
 	case "directional_role_not_confirmed":

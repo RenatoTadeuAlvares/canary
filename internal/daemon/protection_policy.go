@@ -108,7 +108,7 @@ type protectionTrailAssetPolicy struct {
 type protectionTrailOptionPolicy struct {
 	// Enabled turns approved directional-option loss exits and profit trails on (default false).
 	Enabled bool `toml:"enabled" json:"enabled"`
-	// DirectionalIntents are time-bounded exact-contract declarations; an empty set proposes no option exits.
+	// DirectionalIntents are time-bounded exact-contract declarations; missing intent produces blocked reviews only.
 	DirectionalIntents []protectionOptionDirectionalIntent `toml:"directional_intents" json:"directional_intents,omitempty"`
 	// MinDTE excludes options with fewer calendar days to expiry (default 14).
 	MinDTE int `toml:"min_dte" json:"min_dte"`

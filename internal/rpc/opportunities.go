@@ -455,9 +455,10 @@ type TradeProposal struct {
 	CreatedAt                 time.Time                       `json:"created_at,omitzero"`
 }
 
-// TradeProposalOptionExit explains an approved exact-contract directional
-// option exit. Values are daemon-authored from cost basis and a fresh
-// executable bid; adapters render them without re-evaluating thresholds.
+// TradeProposalOptionExit explains an option exit or blocked review. Intent
+// is directional only for a current exact-contract declaration; unconfirmed
+// leaves purpose unresolved. Values are daemon-authored from cost basis and
+// a fresh executable bid; adapters render them without re-evaluating thresholds.
 type TradeProposalOptionExit struct {
 	Kind                 string   `json:"kind"`
 	Intent               string   `json:"intent"`

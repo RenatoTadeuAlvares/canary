@@ -64,7 +64,7 @@ Loaded from the path in `[auto_trade].policy_file` (default `~/.config/ibkr/poli
 | `[buckets.trailing_stop]` | `tif` | `string` | TIF applies to every trailing-stop proposal in this bucket: DAY or GTC, empty means DAY. |
 | `[buckets.trailing_stop.options]` | `allow_short_profit_trail` | `bool` | AllowShortProfitTrail is retained for config compatibility but must remain false; V1 option exits are long-only. |
 | `[buckets.trailing_stop.options]` | `default_pct` | `float64` | DefaultPct is the native broker percentage-trail distance before spread, minimum-amount, and tick floors (default 30). |
-| `[buckets.trailing_stop.options]` | `directional_intents` | `[]protectionOptionDirectionalIntent` | DirectionalIntents are time-bounded exact-contract declarations; an empty set proposes no option exits. |
+| `[buckets.trailing_stop.options]` | `directional_intents` | `[]protectionOptionDirectionalIntent` | DirectionalIntents are time-bounded exact-contract declarations; missing intent produces blocked reviews only. |
 | `[buckets.trailing_stop.options]` | `enabled` | `bool` | Enabled turns approved directional-option loss exits and profit trails on (default false). |
 | `[buckets.trailing_stop.options]` | `limit_offset_abs` | `float64` | LimitOffsetAbs is the explicitly configured absolute limit offset for the stop; required positive when order_type is TRAIL LIMIT (default 0.05). |
 | `[buckets.trailing_stop.options]` | `locked_gain_pct` | `float64` | LockedGainPct is the minimum gain over cost the rounded initial trail stop must retain (default 5). |

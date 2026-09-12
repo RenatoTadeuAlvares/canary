@@ -1,6 +1,6 @@
 # Directional option exit policy
 
-Updated: 2026-08-13
+Updated: 2026-09-12
 Status: implemented locally; execution parameters approved
 
 ## Decision
@@ -20,7 +20,12 @@ Status: implemented locally; execution parameters approved
   construction. `internal/risk.EvaluateOptionExit` consumes both and the typed
   trade-proposal RPC binds both policy fingerprints.
 - **Status:** advisory proposal policy. It is not protection coverage and does
-  not grant broker-write authority.
+  not grant broker-write authority. When enabled, every nonzero held option is
+  evaluated for review coverage, including absent or expired intent and
+  unsupported short positions. An eligible position below both action
+  thresholds has no action proposal; unresolved positions have blocked review
+  rows rather than silently disappearing. Existing explicit ignore decisions
+  remain effective.
 
 ## Meaning
 
@@ -91,7 +96,14 @@ Status: implemented locally; execution parameters approved
 ## Operating cadence
 
 - The daemon evaluates the policy during its ordinary proposal cadence and on
-  explicit refresh; routine threshold checking is automated.
+  explicit refresh; routine threshold checking is automated. Missing, future
+  or expired intent produces `directional_intent_required` and
+  `option_exit.intent = "unconfirmed"`. Such rows do not request new broker
+  quotes or reuse shared-cache quotes to imply an executable exit.
+- Each option-policy blocker includes a typed `action` describing the next
+  step and whether the unresolved work concerns owner intent, broker evidence,
+  a session condition or the unsupported short/strategy workflow. A blocked
+  review never implies a 0% return when eligibility prevented measurement.
 - A fresh proposal is the pre-trade artifact. The trader must still review the
   exact contract, quantity, order shape, WhatIf result, and write confirmation.
 - Broker order status and broker statements remain final for fills, partial
@@ -125,5 +137,76 @@ Status: implemented locally; execution parameters approved
 The approved runtime policy sets `[buckets.trailing_stop.options].enabled =
 true` and explicitly supplies `limit_offset_abs = 0.05`. The loader still
 refuses activation when the field is inherited or omitted. An empty
-`directional_intents` list produces no option-exit candidates; each exact
-contract requires its own current time-bounded intent record before evaluation.
+`directional_intents` list produces blocked option review rows. Each exact
+contract still requires its own current time-bounded intent record before an
+executable-price request or actionable directional exit can qualify.
+
+
+## Incremental exact-contract evidence extension
+
+The September coverage change does not clear the economic-role blocker. The
+smallest useful next evidence extension belongs in Canary, with no new model
+or risk thresholds:
+
+1. Bind a fresh, non-sharing option subscription to a positive ConID, complete
+   contract identity and the current broker session. Capture model-computation
+   delta and underlying price from that exact request ID, with their actual
+   receipt time and live/delayed classification. The existing symbol-based
+   Greeks cache cannot supply this receipt; zero delta must remain distinct
+   from missing delta. A new quote price tick does not freshen older Greeks.
+2. Use the same exact evidence for every option contributing to the economic
+   exposure calculation, together with current stock positions and explicit
+   FX-to-base evidence. Require one complete broker-position scope and prove
+   it did not change during collection. Missing rows, stale evidence,
+   unsupported exposures, session changes or non-finite numbers keep the
+   result unclassified. Do not treat an incomplete positive-exposure sum as
+   "no long book" or use it as a small denominator to declare a put directional.
+3. Feed those checked inputs into the existing pure Rulebook economic-role
+   calculation. Preserve its protection/directional semantics and configured
+   bands. Carry the exact evidence and position-scope identity into the
+   proposal revision; recheck role and scope at the existing preview/submit
+   boundary so a formerly directional put cannot be sold after it becomes
+   portfolio protection.
+4. Keep strategy grouping independent. Two inferred legs cannot become
+   independent just because the owner declared both directional. Supporting
+   explicit independent-position lineage or a grouped exit needs a separate
+   reviewed contract; until then the strategy blocker remains.
+
+Synthetic acceptance witnesses must reject same-symbol/different-class or
+ConID swaps, reconnects, stale/delayed computations, partial Greek components,
+missing FX, an incomplete long book, and a position change between review and
+execution. A complete exact book classified directional should qualify only
+when the existing intent, strategy, DTE, quote, spread and order gates also
+pass. Real regular-session broker evidence is a separate commissioning check;
+hermetic fixtures cannot prove entitlement or live option liquidity.
+
+## Remaining owner choices
+
+- Confirm whether related option legs are independent trades, a combined
+  strategy, or portfolio protection; do not infer this from a contract name.
+- The existing approved loss line is **60% premium loss** (40% is a Rulebook
+  watch line). It creates a **DAY patient-limit close proposal**, not a resting
+  loss stop. The profit trail arms at **50% premium gain**, normally trails
+  **30%**, remains within **20–50%**, preserves at least **5% over cost**, and
+  uses a **0.05 quote-currency TRAIL LIMIT offset**. These settings are reused,
+  not newly calibrated or silently relaxed by this coverage change.
+- Pre-authorised submission of option orders is not activated here. The owner
+  still needs to approve the precise standing execution mandate, including
+  the residual risk that a triggered limit trail can remain unfilled. Broker
+  writes continue to require the current transaction-specific authority path.
+- The long-option policy requires **14 DTE** and spread at most **25% of mid**.
+  Shorts, near-expiry options and grouped strategies remain visible exceptions
+  for their own workflows; this work does not extend the long-option policy
+  to them or claim automatic protection for every option position.
+
+
+## Desk execution handoff boundary
+
+The current proposal API is suitable for read-only mechanical review. Its
+preview returns a sanitized draft and token ID, while proposal submission
+creates a fresh internal order preview. Desk cannot yet submit the exact
+previously displayed preview through this contract. A later execution slice
+must explicitly bind the reviewed native order terms, current proposal
+revision and execution authority; it must not reconstruct an option or
+stock/ETF trailing stop as a generic order to work around this boundary.
+This coverage change neither widens that API nor activates automatic orders.
