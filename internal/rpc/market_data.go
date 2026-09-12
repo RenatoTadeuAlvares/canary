@@ -58,4 +58,21 @@ type MarketHistoryResult struct {
 	Reference        *float64             `json:"reference,omitempty"`
 	ReferenceName    string               `json:"reference_name,omitempty"`
 	CoverageStatus   string               `json:"coverage_status"`
+	Cache            *MarketHistoryCache  `json:"cache,omitempty"`
+}
+
+// MarketHistoryCache identifies the records actually selected for display.
+// StoredAt is a durability receipt, not a market clock. Coverage never implies
+// that every interval traded or that a daily futures settlement is final.
+type MarketHistoryCache struct {
+	Selected        string    `json:"selected"`
+	StoredAt        time.Time `json:"stored_at,omitzero"`
+	FetchedAt       time.Time `json:"fetched_at"`
+	CoveredThrough  time.Time `json:"covered_through"`
+	Coverage        string    `json:"coverage"`
+	MissingSessions int       `json:"missing_sessions,omitempty"`
+	Detail          string    `json:"detail,omitempty"`
+	RefreshFailed   bool      `json:"refresh_failed,omitempty"`
+	RefreshDue      bool      `json:"refresh_due,omitempty"`
+	PreviousWindow  bool      `json:"previous_window,omitempty"`
 }

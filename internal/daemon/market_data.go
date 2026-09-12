@@ -117,6 +117,14 @@ func (s *Server) handleMarketSnapshot(ctx context.Context, req *rpc.Request) (*r
 	if err != nil || !connector.SessionCurrent(binding) || current.Authority == nil || current.Authority.Availability != rpc.AccountDataAvailable || current.Authority.Freshness != rpc.AccountDataFreshnessCurrent || current.Authority.Scope != result.Authority.Scope {
 		return nil, errors.New("portfolio scope changed during market observation")
 	}
+	for _, list := range [][]rpc.MarketInstrument{result.Instruments, result.Underlyings} {
+		for _, item := range list {
+			if item.Quote != nil && item.Quote.Contract.ConID > 0 {
+				s.rememberMarketHistory(rpc.MarketHistoryParams{Contract: item.Quote.Contract, Range: "1D"})
+				s.rememberMarketHistory(rpc.MarketHistoryParams{Contract: item.Quote.Contract, Range: "1Y"})
+			}
+		}
+	}
 	return result, nil
 }
 
@@ -141,15 +149,18 @@ func marketHistoryWindow(r string, now time.Time) (int, string, error) {
 	}
 }
 
-func (s *Server) fetchMarketHistory(ctx context.Context, req *rpc.Request) (*rpc.MarketHistoryResult, error) {
-	var p rpc.MarketHistoryParams
-	if err := decodeParams(req.Params, &p); err != nil {
-		return nil, err
-	}
-	now := time.Now()
+func (s *Server) fetchMarketHistoryDays(ctx context.Context, p rpc.MarketHistoryParams, tailDays int, now time.Time) (*rpc.MarketHistoryResult, error) {
 	days, interval, err := marketHistoryWindow(p.Range, now)
 	if err != nil {
 		return nil, err
+	}
+	if p.Range == "1D" {
+		days = min(6, max(days, int(math.Ceil(now.Sub(historyRequestStart(p, now)).Hours()/24))))
+	}
+	if tailDays > 0 {
+		days = min(days, tailDays)
+	} else if tailDays < 0 {
+		days = min(1830, -tailDays)
 	}
 	if isOptionQuoteContract(p.Contract) {
 		return nil, errBadRequest("price history currently supports underlyings; option history is not supplied")
@@ -195,7 +206,17 @@ func (s *Server) fetchMarketHistory(ctx context.Context, req *rpc.Request) (*rpc
 	}
 	result.PriceBasis = series.WhatToShow
 	result.RegularHoursOnly = interval == "1 day"
-	result.RequestedStart = marketHistoryStart(p.Range, now)
+	result.RequestedStart = historyRequestStart(p, now)
+	if tailDays < 0 {
+		result.RequestedStart = now.AddDate(0, 0, -days)
+	}
+	if tailDays > 0 && now.AddDate(0, 0, -days).After(result.RequestedStart) {
+		result.RequestedStart = now.AddDate(0, 0, -days)
+	}
+	if interval == "1 day" {
+		start := result.RequestedStart
+		result.RequestedStart = time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	}
 	if len(bars) > ibkrlib.ChartMaxBars {
 		return nil, errors.New("history exceeds bounded series size")
 	}

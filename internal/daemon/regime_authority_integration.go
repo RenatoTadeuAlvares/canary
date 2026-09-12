@@ -66,6 +66,7 @@ func (s *Server) stopServerContextAndWait() {
 		cancel()
 	}
 	s.macroLoopWG.Wait()
+	s.marketData.loopWG.Wait()
 	s.regimeRefreshLoopWG.Wait()
 	s.rulebookRefreshLoopWG.Wait()
 	s.alertShadowLoopWG.Wait()

@@ -1245,6 +1245,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.startRegimeRefreshLoop(serverCtx)
 	s.startRulebookCanonicalRefreshLoop(serverCtx)
 	s.startAlertShadowObservationLoops(serverCtx)
+	s.startMarketHistoryRefresh(serverCtx)
 	go s.runCoreStoreRecoveryLoop(serverCtx)
 	go s.runAccountPnLAuthorityLoop(serverCtx)
 	go s.acceptLoop(ctx, s.listener)
