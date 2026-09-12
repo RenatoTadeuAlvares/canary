@@ -149,6 +149,9 @@ type protectionOptionDirectionalIntent struct {
 	Reason     string    `toml:"reason" json:"reason"`
 	ApprovedAt time.Time `toml:"approved_at" json:"approved_at"`
 	ExpiresAt  time.Time `toml:"expires_at" json:"expires_at"`
+	// IndependentExit resolves inferred grouping only when every exact leg
+	// is explicitly declared independent; confirmed strategy lineage wins.
+	IndependentExit bool `toml:"independent_exit" json:"independent_exit,omitempty"`
 }
 
 type protectionPolicyManager struct {

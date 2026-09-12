@@ -599,7 +599,7 @@ func (e *proposalEngine) generate(ctx context.Context, policy protectionPolicy, 
 		}
 		if policy.Buckets.TrailingStop.Options.Enabled {
 			intents := directionalOptionIntents(policy.Buckets.TrailingStop.Options)
-			strategyLegs, ambiguousStrategies := optionExitStrategyScope(pos)
+			strategyLegs, ambiguousStrategies := optionExitStrategyScope(pos, intents, now)
 			rulebookPolicy := risk.DefaultRulebookPolicy()
 			for _, row := range pos.Options {
 				if row.Quantity == 0 {
@@ -624,6 +624,13 @@ func (e *proposalEngine) generate(ctx context.Context, policy protectionPolicy, 
 					minTick = e.resolveRowMinTick(exactRow)
 				}
 				if p, ok := optionExitProposal(policy, status, exactRow, sources, now, decision, economicRole, minTick, rulebookPolicy.ExitActLossPct); ok {
+					p.OptionExit.ExitManagement = "standalone"
+					if !standalone {
+						p.OptionExit.ExitManagement = "grouped_or_unresolved"
+					} else if intentCurrent && intent.IndependentExit {
+						p.OptionExit.ExitManagement = "independent"
+						p.Details = append(p.Details, "Operator-approved independent exit for this exact contract; underlying exposure remains combined for review.")
+					}
 					if p.Trail != nil {
 						p.ExecutionSemantics = buildProposalExecutionSemantics(p, "bid", decision.ReferencePrice, exactRow.PriceAt)
 					}
@@ -1320,16 +1327,31 @@ func directionalOptionIntents(cfg protectionTrailOptionPolicy) map[int]protectio
 	return out
 }
 
-// optionExitStrategyScope treats every reconstructed strategy leg as
-// non-standalone. An unresolved grouping issue blocks every option under that
-// underlying because choosing one leg could dismantle an economic strategy.
-func optionExitStrategyScope(pos *rpc.PositionsResult) (map[int]bool, map[string]bool) {
+// optionExitStrategyScope preserves confirmed or unresolved strategy membership.
+// An inferred pair of long options may be managed independently only when both
+// exact contracts have current operator declarations. Group exposure is unchanged.
+func optionExitStrategyScope(pos *rpc.PositionsResult, intents map[int]protectionOptionDirectionalIntent, now time.Time) (map[int]bool, map[string]bool) {
 	legs := make(map[int]bool)
 	ambiguous := make(map[string]bool)
 	if pos == nil {
 		return legs, ambiguous
 	}
+	memberships := make(map[int]int)
 	for _, strategy := range pos.Strategies {
+		for _, leg := range strategy.Legs {
+			memberships[leg.Contract.ConID]++
+		}
+	}
+	for _, strategy := range pos.Strategies {
+		independent := optionExitIndependentInferredPair(strategy, intents, now)
+		for _, leg := range strategy.Legs {
+			if memberships[leg.Contract.ConID] != 1 {
+				independent = false
+			}
+		}
+		if independent {
+			continue
+		}
 		for _, leg := range strategy.Legs {
 			if leg.Contract.ConID > 0 {
 				legs[leg.Contract.ConID] = true
@@ -1342,6 +1364,26 @@ func optionExitStrategyScope(pos *rpc.PositionsResult) (map[int]bool, map[string
 		}
 	}
 	return legs, ambiguous
+}
+
+func optionExitIndependentInferredPair(strategy rpc.PositionStrategy, intents map[int]protectionOptionDirectionalIntent, now time.Time) bool {
+	if strategy.Source != rpc.PositionStrategySourceInferred || strategy.Status != rpc.PositionStrategyStatusCurrent ||
+		strategy.GuaranteedCombo || len(strategy.Legs) != 2 {
+		return false
+	}
+	first := 0
+	for _, leg := range strategy.Legs {
+		id := leg.Contract.ConID
+		intent, ok := intents[id]
+		if id <= 0 || id == first || !ok || intent.ConID != id || !intent.IndependentExit ||
+			intent.ApprovedAt.IsZero() || now.Before(intent.ApprovedAt) || !now.Before(intent.ExpiresAt) ||
+			leg.Quantity <= 0 || math.IsNaN(leg.Quantity) || math.IsInf(leg.Quantity, 0) ||
+			math.Abs(leg.Quantity-math.Round(leg.Quantity)) > 1e-9 {
+			return false
+		}
+		first = id
+	}
+	return true
 }
 
 // optionExitEconomicRole refuses to infer intent from a hedge-listed put's
@@ -1458,7 +1500,7 @@ func optionExitBlockerAction(code string) string {
 	case "directional_intent_required":
 		return "Operator: confirm whether this exact option is a directional trade or portfolio protection; record directional intent only if that is its actual purpose."
 	case "standalone_option_required":
-		return "Operator: review the legs together. Canary must resolve strategy grouping before proposing a single-leg exit; a directional declaration alone does not resolve grouping."
+		return "Operator: review the legs together. Only current independent-exit declarations for both exact long legs can resolve an inferred pair; confirmed strategy lineage and unresolved grouping still require the strategy workflow."
 	case "directional_role_not_confirmed":
 		return "Canary needs fresh broker Greeks tied to each exact contract and a complete portfolio exposure check. Shared Greeks or another intent approval cannot clear this blocker."
 	case "long_option_required":

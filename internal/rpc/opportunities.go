@@ -460,9 +460,12 @@ type TradeProposal struct {
 // leaves purpose unresolved. Values are daemon-authored from cost basis and
 // a fresh executable bid; adapters render them without re-evaluating thresholds.
 type TradeProposalOptionExit struct {
-	Kind                 string   `json:"kind"`
-	Intent               string   `json:"intent"`
-	EconomicRole         string   `json:"economic_role,omitempty"`
+	Kind         string `json:"kind"`
+	Intent       string `json:"intent"`
+	EconomicRole string `json:"economic_role,omitempty"`
+	// ExitManagement is standalone, independent (operator-declared), or
+	// grouped_or_unresolved. It never grants economic-role or order authority.
+	ExitManagement       string   `json:"exit_management,omitempty"`
 	DTE                  int      `json:"dte"`
 	MinDTE               int      `json:"min_dte,omitempty"`
 	CostBasisPremium     *float64 `json:"cost_basis_premium,omitempty"`

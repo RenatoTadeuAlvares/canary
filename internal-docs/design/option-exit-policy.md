@@ -33,8 +33,11 @@ Status: implemented locally; execution parameters approved
   contract multiplier, producing per-share option premium cost. The executable
   comparison price for a long exit is the fresh live bid.
 - **Aggregation unit:** one exact broker option contract (`con_id`). V1 accepts
-  only positive whole-contract long positions that are not part of, or
-  ambiguously associated with, a reconstructed multi-leg strategy.
+  only positive whole-contract long positions. Confirmed or unresolved
+  multi-leg strategy membership blocks a single-leg exit. The sole exception
+  is a current inferred two-leg group whose two exact long contracts each have
+  a current `independent_exit = true` declaration; this affects exit management,
+  not combined portfolio exposure.
   Broker position types `OPT` and `OPTION` identify the same option security;
   reconstruction accepts both and emits canonical `OPT` contracts. Exact IDs,
   whole quantities and ambiguity checks remain required.
@@ -84,9 +87,12 @@ Status: implemented locally; execution parameters approved
   approve a threshold, order-shape, or guardrail change.
 - There is no symbol-wide intent fallback and no automatic `SPY put = hedge`
   or `SPY put = directional` rule. Borderline evidence remains a hedge.
-- Exceptions cannot bypass strategy grouping, freshness, full-quantity,
-  duplicate-order, preview, account/mode, freeze, journal, or current-turn
-  broker-write authority gates.
+- An explicit independent-exit declaration may resolve only the inferred
+  pair described above. It cannot override Canary strategy lineage, a
+  guaranteed combo, unknown/review-required grouping, conflicting membership,
+  or a grouping issue. Freshness, full-quantity, duplicate-order, preview,
+  account/mode, freeze, journal, and current-turn broker-write authority gates
+  remain binding.
 - Any parameter or intent-record change requires a higher protection
   `policy_version`; the daemon fingerprints the resulting semantic policy.
 - Roll back by disabling `[buckets.trailing_stop.options]` with a version bump.
@@ -167,10 +173,11 @@ or risk thresholds:
    proposal revision; recheck role and scope at the existing preview/submit
    boundary so a formerly directional put cannot be sold after it becomes
    portfolio protection.
-4. Keep strategy grouping independent. Two inferred legs cannot become
-   independent just because the owner declared both directional. Supporting
-   explicit independent-position lineage or a grouped exit needs a separate
-   reviewed contract; until then the strategy blocker remains.
+4. Keep strategy grouping independent from economic role. Directional intent
+   alone cannot turn two inferred legs into independent exits. The explicit
+   `independent_exit` contract below may resolve that inferred pair; confirmed
+   strategy lineage and unresolved grouping still block. Economic-role proof
+   remains required regardless of the owner's exit-management declaration.
 
 Synthetic acceptance witnesses must reject same-symbol/different-class or
 ConID swaps, reconnects, stale/delayed computations, partial Greek components,
@@ -182,8 +189,10 @@ hermetic fixtures cannot prove entitlement or live option liquidity.
 
 ## Remaining owner choices
 
-- Confirm whether related option legs are independent trades, a combined
-  strategy, or portfolio protection; do not infer this from a contract name.
+- Record the owner's purpose and exit-management choice for related option
+  legs; do not infer either from a contract name. The owner approved the
+  independent-exit capability on 2026-09-12. Actual held-contract declarations
+  remain in the private policy, not this source document.
 - The existing approved loss line is **60% premium loss** (40% is a Rulebook
   watch line). It creates a **DAY patient-limit close proposal**, not a resting
   loss stop. The profit trail arms at **50% premium gain**, normally trails
@@ -210,3 +219,36 @@ must explicitly bind the reviewed native order terms, current proposal
 revision and execution authority; it must not reconstruct an option or
 stock/ETF trailing stop as a generic order to work around this boundary.
 This coverage change neither widens that API nor activates automatic orders.
+
+
+## Explicit independent exits for an inferred pair
+
+The optional `independent_exit` boolean belongs to each existing
+`[[buckets.trailing_stop.options.directional_intents]]` record. Its default is
+false. Setting it requires the operator's exact-contract decision and shares
+the record's reason, `approved_at` and `expires_at`; it is neither inferred from
+prose nor renewed automatically. Both exact legs must have current true
+values. One-sided, missing, future or expired declarations leave both legs
+blocked by their inferred grouping.
+
+Only a current `source = "inferred"` group of two distinct positive whole long
+option legs can be resolved this way. Confirmed or unknown sources, guaranteed
+combos, review-required groups, short/fractional legs, conflicting memberships
+and `strategy_issues` still block. The original position/strategy/exposure
+snapshot is retained unchanged: management can be independent while exposure
+is viewed together.
+
+The proposal records the effective choice in
+`option_exit.exit_management`: `standalone`, `independent`, or
+`grouped_or_unresolved`. This is separate from the current purpose declaration
+(`option_exit.intent`) and the measured role (`option_exit.economic_role`). An
+independent directional declaration cannot clear missing exact-contract
+Greeks, a possible-protection classification, closed sessions, quote quality,
+order conflicts or broker-write gates.
+
+The boolean participates in the existing semantic policy fingerprint. A
+changed declaration needs a higher `policy_version`; a same-version reload is
+rejected as drift and cannot expand the active authority. To activate for an
+owner-approved pair, add `independent_exit = true` to both existing private
+exact-contract records and increment the current policy version, retaining the
+other approved fields. This implementation does not edit the live policy.
