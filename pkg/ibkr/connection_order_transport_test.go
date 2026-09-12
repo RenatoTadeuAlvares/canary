@@ -885,3 +885,24 @@ func TestOrderMethodsDisabledByDefault(t *testing.T) {
 		t.Fatalf("Connector.CancelOrder err = %v, want ErrTradingDisabled", err)
 	}
 }
+
+// This is the decoded stock shape consumed by the daemon option-exit scope
+// regression. Stock-only derivative placeholders remain broker fields; their
+// absence in PositionView does not imply a different stock contract.
+func TestOptionExitStockPortfolioWirePreservesDerivativePlaceholders(t *testing.T) {
+	connector := readyBrokerEvidenceTestConnector(t)
+	connector.conn.handlePortfolioValue([]string{
+		"7", "8", "900002", "SYNTH", "STK", "0", "0", "0", "100",
+		"NASDAQ", "USD", "SYNTH", "SYNTH", "10", "100", "1000", "100", "0", "0", "U_SYNTHETIC",
+	})
+	rows := connector.conn.GetPositions()
+	if len(rows) != 1 {
+		t.Fatalf("decoded stock count=%d, want one", len(rows))
+	}
+	for _, r := range rows {
+		c := r.Contract
+		if c.ConID != 900002 || c.SecType != "STK" || c.Expiry != "0" || c.Right != "0" || c.Strike != 0 || c.Multiplier != 100 || r.Position != 10 || r.AverageCost != 100 {
+			t.Fatal("portfolio decoder did not preserve stock wire shape")
+		}
+	}
+}

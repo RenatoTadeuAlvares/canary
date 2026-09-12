@@ -312,10 +312,10 @@ func optionExitScopeFailure(scope optionExitBookScope, pos *rpc.PositionsResult,
 			c.Currency != wire.Currency || c.LocalSymbol != wire.LocalSymbol || c.TradingClass != wire.TradingClass {
 			return "position_identity_mismatch"
 		}
-		if c.Expiry != wire.Expiry || c.Right != wire.Right || c.Strike != wire.Strike || (c.SecType == "OPT" && c.Multiplier != wire.Multiplier) {
-			if c.SecType == "STK" {
-				return "stock_derivative_fields_mismatch"
-			}
+		// Match the position projection's security-type semantics: stock
+		// portfolio frames may carry derivative placeholders that are omitted
+		// from PositionView. Every actual option term remains exact.
+		if c.SecType == "OPT" && (c.Expiry != wire.Expiry || c.Right != wire.Right || c.Strike != wire.Strike || c.Multiplier != wire.Multiplier) {
 			return "option_terms_mismatch"
 		}
 		delete(rows, raw.Contract.ConID)
@@ -573,8 +573,6 @@ func optionExitScopeFailureMessage(reason string) string {
 		return "position quantity or cost basis differs between the broker and analysis portfolio"
 	case "position_identity_mismatch":
 		return "contract identity differs between the broker and analysis portfolio"
-	case "stock_derivative_fields_mismatch":
-		return "a broker stock carries option-only fields omitted by the analysis portfolio"
 	case "option_terms_mismatch":
 		return "option expiry, right, strike, or multiplier differs between the broker and analysis portfolio"
 	}

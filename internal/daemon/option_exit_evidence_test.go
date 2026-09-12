@@ -445,8 +445,7 @@ func TestOptionExitScopeFailureDistinguishesProjectionPrerequisites(t *testing.T
 		"position_identity_mismatch": func(f *optionEvidenceFixture, _ *rpc.PositionsResult) {
 			f.scope.Positions[1].Contract.TradingClass = "SYNTHW"
 		},
-		"stock_derivative_fields_mismatch": func(f *optionEvidenceFixture, _ *rpc.PositionsResult) { f.scope.Positions[0].Contract.Right = "0" },
-		"option_terms_mismatch":            func(f *optionEvidenceFixture, _ *rpc.PositionsResult) { f.scope.Positions[1].Contract.Right = "C" },
+		"option_terms_mismatch": func(f *optionEvidenceFixture, _ *rpc.PositionsResult) { f.scope.Positions[1].Contract.Right = "C" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, pos, now := newOptionEvidenceFixture()
@@ -454,6 +453,62 @@ func TestOptionExitScopeFailureDistinguishesProjectionPrerequisites(t *testing.T
 			ev := collectOptionExitEvidence(context.Background(), f, pos, now, func() time.Time { return now })
 			if ev.Failure != name || ev.Closed || ev.Fingerprint != "" || f.reads != 0 {
 				t.Fatalf("scope prerequisite lost: failure=%s reads=%d", ev.Failure, f.reads)
+			}
+		})
+	}
+}
+
+func TestOptionExitStockWirePlaceholdersMatchPositionProjection(t *testing.T) {
+	f, pos, now := newOptionEvidenceFixture()
+	// Decoded portfolio shape, independent of proposalContractFromPosition.
+	// The broker parser preserves derivative placeholders on stock rows;
+	// positions.list omits them while retaining the common stock identity.
+	stock := &ibkr.RawPosition{Account: f.scope.Scope.Account,
+		Contract: ibkr.Contract{ConID: 900002, Symbol: "SYNTH", SecType: "STK", Currency: "USD", LocalSymbol: "SYNTH", TradingClass: "SYNTH", Expiry: "0", Right: "0", Multiplier: 100},
+		Position: 10, AverageCost: 100, MarketPrice: 100, MarketValue: 1000}
+	option := f.scope.Positions[1]
+	f.scope.Positions = []*ibkr.RawPosition{stock, option}
+	pos.Stocks = []rpc.PositionView{{ConID: 900002, Symbol: "SYNTH", SecType: rpc.SecTypeStock, Currency: "USD", LocalSymbol: "SYNTH", TradingClass: "SYNTH", Quantity: 10, AvgCost: 100, Multiplier: 1}}
+	ev := collectOptionExitEvidence(context.Background(), f, pos, now, func() time.Time { return now })
+	if ev.Fingerprint == "" || ev.Roles[option.Contract.ConID] != risk.IndexPutRoleDirectional {
+		t.Fatalf("stock placeholders blocked complete live evidence: %s", ev.Failure)
+	}
+	closedAt := now.AddDate(0, 0, 1)
+	for closedAt.Weekday() != time.Saturday {
+		closedAt = closedAt.AddDate(0, 0, 1)
+	}
+	f.scope.Health.InitialCompletedAt, f.scope.Health.LastUpdateAt = closedAt, closedAt
+	f.reads = 0
+	ev = collectOptionExitEvidence(context.Background(), f, pos, closedAt, func() time.Time { return closedAt })
+	if !ev.Closed || ev.Failure != "session_closed" || f.reads != 0 || ev.Fingerprint != "" {
+		t.Fatalf("valid complete stock projection prevented intentional session deferral: %s", ev.Failure)
+	}
+}
+
+func TestOptionExitProjectionStillRequiresStockIdentityAndEveryOptionTerm(t *testing.T) {
+	for name, mutate := range map[string]func(*ibkr.RawPosition){
+		"stock_conid":        func(r *ibkr.RawPosition) { r.Contract.ConID++ },
+		"stock_symbol":       func(r *ibkr.RawPosition) { r.Contract.Symbol = "OTHER" },
+		"stock_class":        func(r *ibkr.RawPosition) { r.Contract.TradingClass = "OTHER" },
+		"stock_local_symbol": func(r *ibkr.RawPosition) { r.Contract.LocalSymbol = "OTHER" },
+		"stock_currency":     func(r *ibkr.RawPosition) { r.Contract.Currency = "EUR" },
+		"stock_quantity":     func(r *ibkr.RawPosition) { r.Position++ },
+		"stock_cost":         func(r *ibkr.RawPosition) { r.AverageCost++ },
+		"option_expiry":      func(r *ibkr.RawPosition) { r.Contract.Expiry = "20270115" },
+		"option_right":       func(r *ibkr.RawPosition) { r.Contract.Right = "C" },
+		"option_strike":      func(r *ibkr.RawPosition) { r.Contract.Strike++ },
+		"option_multiplier":  func(r *ibkr.RawPosition) { r.Contract.Multiplier++ },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, pos, now := newOptionEvidenceFixture()
+			i := 0
+			if strings.HasPrefix(name, "option_") {
+				i = 1
+			}
+			mutate(f.scope.Positions[i])
+			ev := collectOptionExitEvidence(context.Background(), f, pos, now, func() time.Time { return now })
+			if ev.Failure == "" || ev.Closed || ev.Fingerprint != "" || f.reads != 0 {
+				t.Fatal("stock placeholder normalization hid a real position mismatch")
 			}
 		})
 	}
