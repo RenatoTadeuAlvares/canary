@@ -166,6 +166,7 @@ canary market [--symbol SYMBOL --range 1D] [--json]
 
 | Flag | Takes a value | Allowed values |
 |------|---------------|----------------|
+| `--watch` | no | - |
 | `--symbol` | yes | - |
 | `--range` | yes | `1D`, `5D`, `1M`, `6M`, `YTD`, `1Y`, `5Y` |
 | `--exchange` | yes | - |

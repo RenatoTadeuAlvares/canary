@@ -1,6 +1,7 @@
 package ibkr
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strconv"
@@ -143,6 +144,9 @@ func (c *Connection) CancelPnL(reqID int) error {
 // RequestPnLSingle starts a reqPnLSingle stream for conID on account using
 // reqID. modelCode is empty for accounts without a Financial Advisor model.
 func (c *Connection) RequestPnLSingle(reqID int, account, modelCode string, conID int) error {
+	return c.requestPnLSingleContext(context.Background(), reqID, account, modelCode, conID)
+}
+func (c *Connection) requestPnLSingleContext(ctx context.Context, reqID int, account, modelCode string, conID int) error {
 	if !c.IsConnected() {
 		return fmt.Errorf("not connected to IBKR")
 	}
@@ -162,7 +166,7 @@ func (c *Connection) RequestPnLSingle(reqID int, account, modelCode string, conI
 		return err
 	}
 	msg := c.encodeMsg(reqPnLSingle, reqID, account, modelCode, conID)
-	return c.sendMessage(msg)
+	return c.sendMessageWithTypeContext(ctx, msg, RequestTypeGeneral)
 }
 
 // CancelPnLSingle requests cancellation of the reqPnLSingle stream identified
@@ -312,6 +316,13 @@ func (c *Connector) AccountDailyPnL() (AccountDailyPnL, bool) {
 // returns [ErrIBKRUnavailable] when the connector is disconnected. One
 // connector must not reuse the same conID for different accounts.
 func (c *Connector) SubscribePositionDailyPnL(account string, conID int) error {
+	return c.SubscribePositionDailyPnLContext(context.Background(), account, conID)
+}
+
+// SubscribePositionDailyPnLContext starts the shared position P&L subscription
+// with caller-owned cancellation. The connector retains at most 50 contracts;
+// an existing contract is idempotent and remains daemon-owned after this returns.
+func (c *Connector) SubscribePositionDailyPnLContext(ctx context.Context, account string, conID int) error {
 	if !c.isConnected() {
 		return ErrIBKRUnavailable
 	}
@@ -344,13 +355,17 @@ func (c *Connector) SubscribePositionDailyPnL(account string, conID int) error {
 		c.pnl.mu.Unlock()
 		return nil
 	}
+	if len(c.pnl.positionReqIDs) >= 50 {
+		c.pnl.mu.Unlock()
+		return fmt.Errorf("position PnL subscription limit reached")
+	}
 	c.pnl.positionReqIDs[conID] = reqID
 	c.pnl.positionByReqID[reqID] = conID
 	// Pre-populate an empty snapshot so AccountDailyPnL-style "exists
 	c.pnl.positionSnapshot[conID] = PositionDailyPnL{}
 	c.pnl.mu.Unlock()
 
-	if err := conn.RequestPnLSingle(reqID, account, "", conID); err != nil {
+	if err := conn.requestPnLSingleContext(ctx, reqID, account, "", conID); err != nil {
 		c.pnl.mu.Lock()
 		if current, ok := c.pnl.positionReqIDs[conID]; ok && current == reqID {
 			delete(c.pnl.positionReqIDs, conID)
@@ -483,6 +498,7 @@ func (c *Connector) MaybeResubscribeStaleDailyPnL(marketOpen bool) bool {
 // the idempotency guards re-arm, then the old wire subscriptions are cancelled
 // by handlePnL (reqID mismatch), so no stale frame races the rebuild.
 func (c *Connector) forceResubscribeDailyPnL() {
+	defer c.display.notify()
 	c.mu.RLock()
 	conn := c.conn
 	c.mu.RUnlock()

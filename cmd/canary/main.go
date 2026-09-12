@@ -309,7 +309,7 @@ func warnIfDaemonVersionMismatch(conn *dial.Conn, cliVersion string) {
 // daemon socket open for an open-ended account or position watch.
 func isStreamingInvocation(cmd string, args []string) bool {
 	switch cmd {
-	case "account", "positions":
+	case "account", "positions", "market":
 	default:
 		return false
 	}

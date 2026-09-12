@@ -725,12 +725,16 @@ func (s *Server) snapshotHeldStockQuote(ctx context.Context, c *ibkrlib.Connecto
 	pollKey := sym
 	var releaseSub func()
 	if routedQuote {
-		key, err := c.SubscribeMarketDataWithContract(ctx, routeContract, defaultGenericTicks)
+		key, release, err := s.subs.HoldContract(ctx, routeContract)
 		if err != nil {
 			return rpc.Quote{}, false, errors.Is(err, ibkrlib.ErrSymbolInactive)
 		}
 		pollKey = key
-		releaseSub = func() { _ = c.UnsubscribeMarketData(key) }
+		releaseSub = func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			release(cleanup)
+		}
 	} else {
 		release, err := s.subs.Hold(ctx, sym)
 		if err != nil {
@@ -1799,7 +1803,7 @@ func (s *Server) handleQuoteSnapshot(ctx context.Context, req *rpc.Request) (*rp
 	pollKey := sym
 	var releaseSub func()
 	if routedQuote {
-		key, err := c.SubscribeMarketDataWithContract(ctx, routeContract, defaultGenericTicks)
+		key, release, err := s.subs.HoldContract(ctx, routeContract)
 		if err != nil && !errors.Is(err, ibkrlib.ErrIBKRUnavailable) {
 			if shell := s.absentQuoteShell(q, err, sessionMarket, hasSessionMarket); shell != nil {
 				return shell, nil
@@ -1807,7 +1811,11 @@ func (s *Server) handleQuoteSnapshot(ctx context.Context, req *rpc.Request) (*rp
 			return nil, err
 		}
 		pollKey = key
-		releaseSub = func() { _ = c.UnsubscribeMarketData(key) }
+		releaseSub = func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			release(cleanup)
+		}
 	} else {
 		// Route through the daemon's subscription manager so a snapshot
 		// running concurrently with `quote --watch` (or another snapshot, or
