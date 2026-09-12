@@ -338,6 +338,7 @@ type Subscription struct {
 	MarkPrice float64
 	BidSize   int64
 	AskSize   int64
+	LastSize  int64
 	Volume    int64
 	AvgVolume int64
 	// OpenInt is the option open interest at this contract: tick 27
@@ -7977,7 +7978,7 @@ func (c *Connector) handleTickSize(fields []string) {
 	// IBKR tick types: 0=BID_SIZE, 3=ASK_SIZE, 8=VOLUME (cumulative day total).
 	// 21=average volume, delivered by the Misc Stats generic-tick bundle (165).
 	// Delayed subscriptions use 69/70/74 for bid size / ask size / volume.
-	// 5=LAST_SIZE is intentionally dropped — too noisy and not surfaced.
+	// 5=LAST_SIZE; delayed subscriptions use 75.
 	// 27=callOpenInterest, 28=putOpenInterest. On option-leg subscriptions,
 	// the gateway emits a zero-valued companion tick for the opposite right,
 	// so only the tick matching Subscription.Right may commit OpenInt. On
@@ -7988,6 +7989,8 @@ func (c *Connector) handleTickSize(fields []string) {
 		sub.BidSize = size
 	case 3, 70:
 		sub.AskSize = size
+	case 5, 75:
+		sub.LastSize = size
 	case 8, 74:
 		sub.Volume = size
 	case 21:
@@ -8503,6 +8506,7 @@ func (c *Connector) MarketDataSnapshot() map[string]*MarketData {
 			MarkPrice:         sub.MarkPrice,
 			BidSize:           int(sub.BidSize),
 			AskSize:           int(sub.AskSize),
+			LastSize:          int(sub.LastSize),
 			Volume:            sub.Volume,
 			AvgVolume:         sub.AvgVolume,
 			LastTickAt:        sub.LastTickAt,

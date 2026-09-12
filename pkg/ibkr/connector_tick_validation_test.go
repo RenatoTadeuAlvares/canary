@@ -512,7 +512,7 @@ func TestShortableAndUnderlyingIVArriveOnWireTickIDs(t *testing.T) {
 
 // TestHandleTickSize_DispatchesByTickType verifies bid_size (0), ask_size (3),
 // volume (8), and average volume (21) ticks land on the right Subscription
-// field. Other tick types (e.g. 5=last_size) are intentionally dropped.
+// field, including last_size (5 and delayed 75).
 func TestHandleTickSize_DispatchesByTickType(t *testing.T) {
 	c := NewConnector(&ConnectorConfig{})
 	c.subMu.Lock()
@@ -528,7 +528,8 @@ func TestHandleTickSize_DispatchesByTickType(t *testing.T) {
 	c.handleTickSize([]string{"2", "6", "7", "70", "2300"})     // delayed_ask_size
 	c.handleTickSize([]string{"2", "6", "7", "74", "9876544"})  // delayed_volume
 	c.handleTickSize([]string{"2", "6", "7", "21", "58900000"}) // avg_volume
-	c.handleTickSize([]string{"2", "6", "7", "5", "999"})       // last_size — ignored
+	c.handleTickSize([]string{"2", "6", "7", "5", "999"})       // last_size
+	c.handleTickSize([]string{"2", "6", "7", "75", "1000"})     // delayed_last_size
 
 	c.subMu.RLock()
 	sub := c.subscriptions["AAPL"]
@@ -545,6 +546,9 @@ func TestHandleTickSize_DispatchesByTickType(t *testing.T) {
 	}
 	if sub.AvgVolume != 58900000 {
 		t.Errorf("AvgVolume: want 58900000, got %d", sub.AvgVolume)
+	}
+	if sub.LastSize != 1000 {
+		t.Errorf("LastSize: want 1000, got %d", sub.LastSize)
 	}
 }
 

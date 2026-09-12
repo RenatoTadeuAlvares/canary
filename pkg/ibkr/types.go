@@ -59,6 +59,7 @@ type MarketData struct {
 	LastTradeTime     time.Time `json:"last_trade_time,omitzero"`
 	BidSize           int       `json:"bid_size"`
 	AskSize           int       `json:"ask_size"`
+	LastSize          int       `json:"last_size"`
 	OpenInt           int64     `json:"open_int"`
 	OpenIntObserved   bool      `json:"open_int_observed,omitempty"`
 	ShortableShares   int64     `json:"shortable_shares,omitempty"`
