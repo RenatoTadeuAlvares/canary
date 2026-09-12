@@ -2,12 +2,14 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/osauer/canary/v2/internal/rpc"
 )
 
 func runMarket(ctx context.Context, env *Env, args []string) int {
 	fs := flagSet(env, "market")
 	fs.Bool("json", false, "emit machine-readable JSON")
+	watch := fs.Bool("watch", false, "stream complete display snapshots as NDJSON")
 	symbol := fs.String("symbol", "", "underlying symbol for history")
 	r := fs.String("range", "1D", "history range: 1D, 5D, 1M, 6M, YTD, 1Y, 5Y")
 	exchange := fs.String("exchange", "SMART", "exact quote exchange")
@@ -15,6 +17,16 @@ func runMarket(ctx context.Context, env *Env, args []string) int {
 	currency := fs.String("currency", "USD", "quote currency")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
+	}
+	if *watch {
+		if *symbol != "" {
+			return fail(env, "market: --watch cannot select history")
+		}
+		enc := json.NewEncoder(env.Stdout)
+		if err := env.Conn.Stream(ctx, rpc.MethodDisplaySubscribe, nil, func(raw json.RawMessage) error { return enc.Encode(raw) }); err != nil && ctx.Err() == nil {
+			return fail(env, "market stream: %v", err)
+		}
+		return 0
 	}
 	if *symbol != "" {
 		var result rpc.MarketHistoryResult

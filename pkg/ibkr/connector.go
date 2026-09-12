@@ -50,9 +50,10 @@ var ErrBrokerIDNamespaceConflict = errors.New("broker id namespace conflict")
 
 // Connector owns one broker connection and its in-memory subscriptions and caches.
 type Connector struct {
-	name   string
-	config *ConnectorConfig
-	conn   *Connection
+	display displayChanges
+	name    string
+	config  *ConnectorConfig
+	conn    *Connection
 
 	fetchContractDetails    func(string, time.Duration) ([]ContractDetailsLite, error)
 	contractTimingHook      func(string, time.Duration, bool)
@@ -272,7 +273,8 @@ type ConnectorConfig struct {
 
 // Subscription holds the latest values for one streaming market-data request.
 type Subscription struct {
-	Symbol string
+	LastAt, BidAt, AskAt, MarkAt time.Time
+	Symbol                       string
 	// SessionEpoch is set for exact-session subscriptions. Zero identifies a
 	// legacy/shared subscription that cannot satisfy broker-write authority.
 	SessionEpoch uint64
@@ -284,11 +286,13 @@ type Subscription struct {
 	Bid       float64
 	Ask       float64
 	// MarkPrice is tick 37, which may be the only price for some indices.
-	MarkPrice float64
-	BidSize   int64
-	AskSize   int64
-	Volume    int64
-	AvgVolume int64
+	MarkPrice      float64
+	BidSize        int64
+	AskSize        int64
+	Volume         int64
+	VolumeObserved bool
+	VolumeAt       time.Time
+	AvgVolume      int64
 	// OpenInt is the option open interest at this contract: tick 27
 	// the opposite right, so only the tick matching Right is committed.
 	OpenInt         int64
@@ -787,6 +791,7 @@ func NewConnector(config *ConnectorConfig) *Connector {
 	}
 	c.conn.evidenceBarrier = &c.evidenceBarrier
 	c.conn.publicationBarrier = &c.publicationBarrier
+	c.conn.displayChanged = c.display.notify
 	c.fetchContractDetails = c.FetchContractDetails
 	c.resolveWSHContract = c.resolveWSHStockContract
 	c.resolveWSHExactContract = c.resolveWSHExactStockContract
@@ -1547,6 +1552,7 @@ func (c *Connector) handleBackendConnectivityNotice(origin ConnectorSessionBindi
 }
 
 func (c *Connector) setBackendConnectivityDown(down bool, at time.Time) {
+	defer c.display.notify()
 	if at.IsZero() {
 		at = time.Now()
 	}
@@ -2168,6 +2174,7 @@ func (c *Connector) attachConnectionHooks(conn *Connection) {
 }
 
 func (c *Connector) onConnectionEstablished(conn *Connection) {
+	defer c.display.notify()
 	c.resetWSHMetadataReadiness()
 	c.evidenceBarrier.RLock()
 	c.invalidateUnstampedConnectorObservations(conn)
@@ -2180,6 +2187,7 @@ func (c *Connector) onConnectionEstablished(conn *Connection) {
 }
 
 func (c *Connector) onConnectionLost(conn *Connection) {
+	defer c.display.notify()
 	c.resetWSHMetadataReadiness()
 	c.evidenceBarrier.RLock()
 	c.mu.Lock()
@@ -4264,6 +4272,8 @@ func resetSubscriptionObservations(sub *Subscription) {
 	sub.BidSize = 0
 	sub.AskSize = 0
 	sub.Volume = 0
+	sub.VolumeObserved = false
+	sub.VolumeAt = time.Time{}
 	sub.AvgVolume = 0
 	sub.OpenInt = 0
 	sub.OpenIntObserved = false
@@ -4280,6 +4290,10 @@ func resetSubscriptionObservations(sub *Subscription) {
 	sub.Week26High = 0
 	sub.Week52Low = 0
 	sub.Week52High = 0
+	sub.LastAt = time.Time{}
+	sub.BidAt = time.Time{}
+	sub.AskAt = time.Time{}
+	sub.MarkAt = time.Time{}
 	sub.LastTradeTime = time.Time{}
 	sub.LastTickAt = time.Time{}
 	sub.LastPriceTickAt = time.Time{}
@@ -4292,41 +4306,58 @@ func resetSubscriptionObservations(sub *Subscription) {
 // UnsubscribeMarketData removes the normalized symbol or route key from the
 // local subscription cache and best-effort cancels its live broker request. It
 func (c *Connector) UnsubscribeMarketData(symbol string) error {
-	symbol = strings.ToUpper(symbol)
-	c.subMu.Lock()
-	defer c.subMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return c.UnsubscribeMarketDataContext(ctx, symbol)
+}
 
+// UnsubscribeMarketDataContext removes a shared cache entry and best-effort
+// cancels on its originating session. It does not hold the cache mutex during
+// wire I/O. The caller owns the cancellation deadline.
+func (c *Connector) UnsubscribeMarketDataContext(ctx context.Context, symbol string) error {
+	return c.unsubscribeMarketData(ctx, symbol, nil)
+}
+
+// UnsubscribeSharedMarketDataForSession releases a shared line only if binding still
+// names the cache generation. Retired callers cannot remove a successor line.
+func (c *Connector) UnsubscribeSharedMarketDataForSession(ctx context.Context, binding ConnectorSessionBinding, symbol string) error {
+	return c.unsubscribeMarketData(ctx, symbol, &binding)
+}
+func (c *Connector) unsubscribeMarketData(ctx context.Context, symbol string, binding *ConnectorSessionBinding) error {
+	symbol = strings.ToUpper(symbol)
+	c.mu.RLock()
+	conn := c.conn
+	c.mu.RUnlock()
+	var epoch uint64
+	if conn != nil {
+		epoch = conn.BrokerSessionEpoch()
+	}
+	c.subMu.Lock()
+	if binding != nil {
+		if !c.SessionCurrent(*binding) {
+			c.subMu.Unlock()
+			return nil
+		}
+		conn = binding.connection
+		epoch = binding.epoch
+	}
 	sub, exists := c.subscriptions[symbol]
 	if !exists {
-		// Make this idempotent; no-op if not found
-		marketDataLogger.Debugf("%s: Unsubscribe requested for %s but no active subscription found", c.name, symbol)
+		c.subMu.Unlock()
 		return nil
 	}
-
 	delete(c.subscriptions, symbol)
-
-	// Cancel on the wire and release the rate-limiter slot, regardless of
-	// The prior `&& sub.Observed` guard was there to avoid IBKR errorCode 300
-	// already torn down subscriptions. But Observed is only set by
-	// so OPT subscriptions that receive ONLY model-computation ticks (msg 21)
-	// post-disconnect, so the cancel still skips. The only remaining
-	// never accepted — strictly cosmetic, vs slot-leak which is functional.
-	// One narrow exception (wireCancelNeeded): when the gateway itself
-	// reported this exact reqID terminally dead (200/354 system notice),
-	// the wire cancel is guaranteed to draw error 300 — skip it, but
-	// done at notice time; never skipped, per the slot-leak lesson).
-	if c.conn != nil && c.conn.IsConnected() && sub.ReqID != 0 {
-		if wireCancelNeeded(sub) {
-			if err := c.conn.CancelMarketData(sub.ReqID); err != nil {
-				marketDataLogger.Warnf("%s: Failed to cancel market data %s (ReqID: %d): %v", c.name, symbol, sub.ReqID, err)
-			}
-		} else {
-			c.conn.releaseMarketDataSlot(sub.ReqID)
-			marketDataLogger.Debugf("%s: Skipping wire cancel for %s (ReqID %d already rejected server-side)", c.name, symbol, sub.ReqID)
-		}
+	if c.reqIDMap[sub.ReqID] == symbol {
+		delete(c.reqIDMap, sub.ReqID)
 	}
-
-	marketDataLogger.Debugf("%s: Unsubscribed from market data for %s", c.name, symbol)
+	reqID, wire := sub.ReqID, wireCancelNeeded(sub)
+	c.subMu.Unlock()
+	if conn != nil && conn.IsConnected() && reqID != 0 {
+		if wire {
+			return conn.cancelMarketDataForEpoch(ctx, reqID, epoch)
+		}
+		conn.releaseMarketDataSlotAtEpoch(reqID, epoch)
+	}
 	return nil
 }
 
@@ -5690,6 +5721,7 @@ func (c *Connector) handleTickPrice(fields []string) {
 			sub.LastTickAt = observedAt
 			if price > 0 {
 				sub.LastPriceTickAt = observedAt
+				stampDisplayPrice(sub, tickType, observedAt)
 				sub.Observed = true
 				switch tickType {
 				case 1, 66:
@@ -5799,6 +5831,7 @@ func (c *Connector) handleTickPrice(fields []string) {
 	sub.LastTime = observedAt
 	sub.LastTickAt = observedAt
 	sub.LastPriceTickAt = observedAt
+	stampDisplayPrice(sub, tickType, observedAt)
 }
 
 // handleTickGeneric processes generic tick updates. The wire tick ids
@@ -7744,7 +7777,12 @@ func (c *Connector) handleTickSize(fields []string) {
 	case 3, 70:
 		sub.AskSize = size
 	case 8, 74:
+		if size < 0 {
+			return
+		}
 		sub.Volume = size
+		sub.VolumeObserved = true
+		sub.VolumeAt = observedAt
 	case 21:
 		sub.AvgVolume = size
 	case 27:
@@ -8207,17 +8245,20 @@ func (c *Connector) MarketDataSnapshot() map[string]*MarketData {
 
 	for symbol, sub := range c.subscriptions {
 		data[symbol] = &MarketData{
-			Symbol:            symbol,
-			Bid:               sub.Bid,
-			Ask:               sub.Ask,
-			Last:              sub.LastPrice,
-			MarkPrice:         sub.MarkPrice,
-			BidSize:           int(sub.BidSize),
-			AskSize:           int(sub.AskSize),
-			Volume:            sub.Volume,
-			AvgVolume:         sub.AvgVolume,
-			LastTickAt:        sub.LastTickAt,
-			LastPriceTickAt:   sub.LastPriceTickAt,
+			Symbol:          symbol,
+			Bid:             sub.Bid,
+			Ask:             sub.Ask,
+			Last:            sub.LastPrice,
+			MarkPrice:       sub.MarkPrice,
+			BidSize:         int(sub.BidSize),
+			AskSize:         int(sub.AskSize),
+			Volume:          sub.Volume,
+			VolumeObserved:  sub.VolumeObserved,
+			VolumeAt:        sub.VolumeAt,
+			AvgVolume:       sub.AvgVolume,
+			LastTickAt:      sub.LastTickAt,
+			LastPriceTickAt: sub.LastPriceTickAt,
+			LastAt:          sub.LastAt, BidAt: sub.BidAt, AskAt: sub.AskAt, MarkAt: sub.MarkAt,
 			LastTradeTime:     sub.LastTradeTime,
 			OpenInt:           sub.OpenInt,
 			OpenIntObserved:   sub.OpenIntObserved,

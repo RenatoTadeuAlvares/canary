@@ -15,6 +15,10 @@ type Greeks struct {
 // Callers must use the accompanying observed, timestamp, and data-type fields
 // where provided; a numeric zero alone does not always prove the broker
 type MarketData struct {
+	LastAt    time.Time `json:"last_at,omitzero"`
+	BidAt     time.Time `json:"bid_at,omitzero"`
+	AskAt     time.Time `json:"ask_at,omitzero"`
+	MarkAt    time.Time `json:"mark_at,omitzero"`
 	Symbol    string    `json:"symbol"`
 	Timestamp time.Time `json:"timestamp"`
 
@@ -42,8 +46,10 @@ type MarketData struct {
 	Week52Low  float64 `json:"week_52_low,omitempty"`
 	Week52High float64 `json:"week_52_high,omitempty"`
 
-	Volume    int64 `json:"volume"`
-	AvgVolume int64 `json:"avg_volume,omitempty"`
+	Volume         int64     `json:"volume"`
+	VolumeObserved bool      `json:"volume_observed"`
+	VolumeAt       time.Time `json:"volume_at,omitzero"`
+	AvgVolume      int64     `json:"avg_volume,omitempty"`
 	// LastTickAt is when this process last received a tick on the
 	// subscription, or zero when none has ever arrived. See
 	// [Subscription.LastTickAt] for the two limits that bind every reader:

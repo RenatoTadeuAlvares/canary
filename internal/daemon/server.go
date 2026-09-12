@@ -148,7 +148,10 @@ type Server struct {
 
 	// subs owns refcounted market-data subscriptions shared between the
 	// resource subscribers. Initialized in New (depends only on Server's
-	subs *subManager
+	subs            *subManager
+	displayMu       sync.Mutex
+	displayStopping bool
+	displayRuns     map[*displayRun]struct{}
 
 	// expiryIVCache memoises per-(symbol, expiry) ATM IV so a fresh
 	expiryIVs *expiryIVCache
@@ -1313,6 +1316,7 @@ func (s *Server) closeListener() {
 // Stop closes the listener and IBKR connection. Safe to call multiple times.
 // A Server that never reached openSocket (e.g. lock contention exit) must
 func (s *Server) Stop() {
+	s.stopDisplay()
 	// Notify any live streaming subscribers BEFORE we tear the listener
 	// down: emits a daemon_shutdown error frame, lets the consumer render
 	// a clean message, and unsubscribes the IBKR market-data lines so the
@@ -2231,6 +2235,10 @@ func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 			_ = enc.Encode(rpc.Response{ID: "", Ok: false, Error: &rpc.Error{Code: rpc.CodeBadRequest, Message: err.Error()}})
 			continue
 		}
+		if req.Method == rpc.MethodDisplaySubscribe {
+			s.handleDisplaySubscribe(connCtx, &req, conn, r)
+			return
+		}
 		if terminal := s.dispatch(connCtx, &req, enc, r); terminal {
 			return
 		}
@@ -2413,6 +2421,10 @@ func (s *Server) dispatch(ctx context.Context, req *rpc.Request, enc *json.Encod
 		s.unary(req, enc, func() (any, error) { return s.handleOrderPreview(ctx, req) })
 	case rpc.MethodStrategyPreview:
 		s.unary(req, enc, func() (any, error) { return s.handleStrategyPreview(ctx, req) })
+	case rpc.MethodDisplaySubscribe:
+		// serveConn handles this method with the owned socket and write deadlines.
+		writeError(enc, req.ID, rpc.CodeInternal, "display stream requires its socket owner")
+		return true
 	case rpc.MethodQuoteSubscribe:
 		s.handleQuoteSubscribe(ctx, req, enc, r)
 		return true

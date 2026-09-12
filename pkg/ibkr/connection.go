@@ -121,6 +121,7 @@ type ConnectionConfig struct {
 
 // RawPosition contains the latest broker-reported values for one position.
 type RawPosition struct {
+	ValuationAt   time.Time
 	Account       string
 	Contract      Contract
 	Position      float64
@@ -213,9 +214,13 @@ func (c *Connection) tlsAttempts() []bool {
 
 // Connection owns one TWS protocol session and its request and receipt state.
 type Connection struct {
-	config   *ConnectionConfig
-	status   ConnectionStatus
-	statusMu sync.RWMutex
+	displayChanged       func()
+	displayAccount       string
+	displayAccountValues map[string]string
+	accountValueTimes    map[string]time.Time // guarded by accountMu
+	config               *ConnectionConfig
+	status               ConnectionStatus
+	statusMu             sync.RWMutex
 
 	// Connection state
 	connectedAt time.Time
@@ -1786,6 +1791,14 @@ func (c *Connection) processMessageAtEpoch(msgBytes []byte, epoch uint64) {
 		return
 	}
 
+	// Run after the receipt and every lease have been released.
+	switch msgID {
+	case msgTickPrice, msgTickSize, msgTickString, msgTickGeneric, msgMarketDataType, msgAcctValue, msgPortfolioValue, msgAcctUpdateTime, msgAcctDownloadEnd, msgAccountSummary, msgManagedAccts, msgPnL, msgPnLSingle, msgErrMsg, msgSystemNotification:
+		if c.displayChanged != nil {
+			defer c.displayChanged()
+		}
+	}
+
 	// The first atomic check above is an inexpensive fast path. Every ordinary
 	// and legacy callbacks, so a retired reader cannot contaminate the next
 	// socket's portfolio/account/request authority after reconnect begins.
@@ -1926,7 +1939,8 @@ func (c *Connection) processMessageAtEpoch(msgBytes []byte, epoch uint64) {
 	case msgTickNews:
 		// News tick - handle silently for now
 	case msgTickString:
-		// String tick data (e.g., last timestamp, bid/ask exchange)
+		// String ticks carry broker trade times as well as exchange names.
+		c.dispatchHandlers(msgTickString, fields, epoch)
 	case msgTickGeneric:
 		// Generic tick data (e.g., 106 = Option Implied Volatility)
 		if c.dispatchHandlers(msgTickGeneric, fields, epoch) {
@@ -2817,6 +2831,7 @@ func (c *Connection) handlePortfolioValue(fields []string) {
 
 	next := &RawPosition{
 		Account:       fields[19],
+		ValuationAt:   time.Now().UTC(),
 		Contract:      contract,
 		Position:      position,
 		MarketPrice:   marketPrice,
@@ -3030,6 +3045,9 @@ func (c *Connection) invalidatePortfolioGeneration(observedAt time.Time) {
 }
 
 func (c *Connection) resetPortfolioStreamHealth(account string, requestedAt time.Time) {
+	if c.displayChanged != nil {
+		defer c.displayChanged()
+	}
 	unlockEvidence := c.lockEvidenceChange()
 	defer unlockEvidence()
 	c.portfolioProjectionMu.Lock()
@@ -3095,6 +3113,15 @@ func (c *Connection) handleAccountValue(fields []string) {
 		mapKey = fmt.Sprintf("%s_%s", key, currency)
 	}
 	c.accountSummary[mapKey] = value
+	if accountCodeConcrete(account) && strings.EqualFold(account, bound) {
+		if c.displayAccount != account {
+			c.displayAccount = account
+			c.displayAccountValues = map[string]string{}
+			c.accountValueTimes = map[string]time.Time{}
+		}
+		c.displayAccountValues[mapKey] = value
+		c.accountValueTimes[mapKey] = time.Now().UTC()
+	}
 	c.accountMu.Unlock()
 
 	// Log important values
@@ -4764,6 +4791,9 @@ func (c *Connection) invalidateUnstampedObservationAuthority() {
 	c.account = ""
 	c.managedAccounts = nil
 	clear(c.accountSummary)
+	c.displayAccount = ""
+	c.displayAccountValues = nil
+	c.accountValueTimes = nil
 	clear(c.summarySnapshots)
 	c.accountMu.Unlock()
 
