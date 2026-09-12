@@ -683,6 +683,7 @@ func (s *Server) prewarmStockQuoteSummaries(ctx context.Context, c *ibkrlib.Conn
 		p.QuotePriceSource = q.QuotePriceSource
 		p.QuotePriceAt = q.QuotePriceAt
 		p.TradeAt = q.TradeAt
+		p.TradePhase = q.TradePhase
 		p.QuotePriceAsOf = q.QuotePriceAsOf
 		p.QuoteChange = q.QuoteChange
 		p.QuoteChangePct = q.QuoteChangePct
@@ -2086,6 +2087,29 @@ func quoteSessionMarketForContract(c rpc.ContractParams) (marketcal.Market, bool
 	return quoteMarketForStockContract(c), true
 }
 
+// quoteTradePhase uses the event clock so a weekend receipt cannot relabel
+// an extended-hours trade. It does not infer an unsupported venue's hours.
+func quoteTradePhase(c rpc.ContractParams, at time.Time) string {
+	market, supported := quoteSessionMarketForContract(c)
+	if !supported || at.IsZero() {
+		return ""
+	}
+	session, err := marketcal.New().SessionAt(market, at)
+	if err != nil || session.State == marketcal.StateUnknown {
+		return ""
+	}
+	if session.Open.IsZero() || session.Close.IsZero() {
+		return "closed"
+	}
+	if at.Before(session.Open) {
+		return "pre_market"
+	}
+	if at.Before(session.Close) {
+		return "regular"
+	}
+	return "post_market"
+}
+
 func quoteHasRegularSessionCalendar(c rpc.ContractParams) bool {
 	secType := strings.ToUpper(strings.TrimSpace(c.SecType))
 	return secType == "" || secType == "STK" || secType == "ETF"
@@ -2095,6 +2119,7 @@ func (s *Server) attachQuoteSessionContext(q *rpc.Quote, market marketcal.Market
 	if q == nil {
 		return
 	}
+	q.TradePhase = quoteTradePhase(q.Contract, q.TradeAt)
 	session, err := marketcal.New().SessionAt(market, q.AsOf)
 	if err != nil {
 		if s.logger != nil {

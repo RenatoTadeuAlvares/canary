@@ -210,6 +210,7 @@ func projectDisplay(snapshot ibkr.DisplaySnapshot, holds []displayHold, scope rp
 			q.Ask = ptrIfPos(md.Ask)
 			q.PreviousClose = ptrIfPos(md.Close)
 			q.TradeAt = md.LastTradeTime
+			q.TradePhase = quoteTradePhase(q.Contract, q.TradeAt)
 			q.Price = q.Last
 			q.PriceSource = "last"
 			q.PriceReceivedAt = md.LastAt

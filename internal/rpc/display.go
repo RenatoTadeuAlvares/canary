@@ -49,18 +49,21 @@ type DisplayPosition struct {
 // DataType and source clocks must be checked before describing a value as live.
 // Volume is cumulative session volume, never a historical bar's volume.
 type DisplayQuote struct {
-	Price           *float64       `json:"price"`
-	PriceSource     string         `json:"price_source"`
-	Contract        ContractParams `json:"contract"`
-	Kind            string         `json:"kind"`
-	Key             string         `json:"key"`
-	DataType        string         `json:"data_type"`
-	Last            *float64       `json:"last"`
-	Bid             *float64       `json:"bid"`
-	Ask             *float64       `json:"ask"`
-	PreviousClose   *float64       `json:"previous_close"`
-	TradeAt         time.Time      `json:"trade_at,omitzero"`
-	PriceReceivedAt time.Time      `json:"price_received_at,omitzero"`
-	Volume          *int64         `json:"volume"`
-	VolumeAt        time.Time      `json:"volume_at,omitzero"`
+	Price         *float64       `json:"price"`
+	PriceSource   string         `json:"price_source"`
+	Contract      ContractParams `json:"contract"`
+	Kind          string         `json:"kind"`
+	Key           string         `json:"key"`
+	DataType      string         `json:"data_type"`
+	Last          *float64       `json:"last"`
+	Bid           *float64       `json:"bid"`
+	Ask           *float64       `json:"ask"`
+	PreviousClose *float64       `json:"previous_close"`
+	TradeAt       time.Time      `json:"trade_at,omitzero"`
+	// TradePhase describes the original trade session, never receipt time.
+	// Values match Quote.TradePhase; empty means the session is unknown.
+	TradePhase      string    `json:"trade_phase,omitempty"`
+	PriceReceivedAt time.Time `json:"price_received_at,omitzero"`
+	Volume          *int64    `json:"volume"`
+	VolumeAt        time.Time `json:"volume_at,omitzero"`
 }

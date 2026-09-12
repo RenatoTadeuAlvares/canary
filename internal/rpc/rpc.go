@@ -1590,7 +1590,10 @@ type Quote struct {
 	QuotePriceAt      time.Time `json:"quote_price_at,omitzero"`
 	// TradeAt is the broker-reported last-trade time, never a local receipt.
 	// Zero means IBKR did not supply a trade timestamp.
-	TradeAt             time.Time `json:"trade_at,omitzero"`
+	TradeAt time.Time `json:"trade_at,omitzero"`
+	// TradePhase locates TradeAt relative to the supported regular session:
+	// pre_market, regular, post_market or closed; empty means unknown.
+	TradePhase          string    `json:"trade_phase,omitempty"`
 	QuotePriceAsOf      string    `json:"quote_price_as_of,omitempty"`
 	QuoteChange         *float64  `json:"quote_change,omitempty"`
 	QuoteChangePct      *float64  `json:"quote_change_pct,omitempty"`
@@ -1697,13 +1700,16 @@ type PositionView struct {
 	QuotePriceAt      time.Time `json:"quote_price_at,omitzero"`
 	// TradeAt is the broker-reported last-trade time, never a local receipt.
 	// Zero means IBKR did not supply a trade timestamp.
-	TradeAt        time.Time `json:"trade_at,omitzero"`
-	QuotePriceAsOf string    `json:"quote_price_as_of,omitempty"`
-	QuoteChange    *float64  `json:"quote_change,omitempty"`
-	QuoteChangePct *float64  `json:"quote_change_pct,omitempty"`
-	PrevClose      *float64  `json:"prev_close,omitempty"`
-	Bid            *float64  `json:"bid,omitempty"`
-	Ask            *float64  `json:"ask,omitempty"`
+	TradeAt time.Time `json:"trade_at,omitzero"`
+	// TradePhase locates TradeAt relative to the supported regular session:
+	// pre_market, regular, post_market or closed; empty means unknown.
+	TradePhase     string   `json:"trade_phase,omitempty"`
+	QuotePriceAsOf string   `json:"quote_price_as_of,omitempty"`
+	QuoteChange    *float64 `json:"quote_change,omitempty"`
+	QuoteChangePct *float64 `json:"quote_change_pct,omitempty"`
+	PrevClose      *float64 `json:"prev_close,omitempty"`
+	Bid            *float64 `json:"bid,omitempty"`
+	Ask            *float64 `json:"ask,omitempty"`
 	// DayChange is per-share for stocks (Mark − stock prev close); for
 	// populated. nil when any input is missing — never fabricated.
 	DayChange      *float64      `json:"day_change,omitempty"`
