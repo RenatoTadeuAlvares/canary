@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,12 +21,13 @@ type optionEvidenceFixture struct {
 	fxEvidence orderNotionalAuthority
 	currentOK  bool
 	readErr    error
+	captureErr error
 	reads      int
 	onRead     func()
 }
 
 func (f *optionEvidenceFixture) capture(context.Context) (optionExitBookScope, error) {
-	return f.scope, nil
+	return f.scope, f.captureErr
 }
 func (f *optionEvidenceFixture) current(optionExitBookScope) bool { return f.currentOK }
 func (f *optionEvidenceFixture) option(_ context.Context, c rpc.ContractParams) (*ibkr.OptionRiskMeasurement, error) {
@@ -405,5 +407,54 @@ func TestOptionExitKnownDataFailureDoesNotBecomeWaitingAtClose(t *testing.T) {
 	f.scope.Health.LastUpdateAt = now
 	if ev := e.optionExitEvidence(context.Background(), pos, now); ev.Closed || ev.Failure != "exact_model_unavailable" {
 		t.Fatal("closing session hid known model failure")
+	}
+}
+
+func TestOptionExitScopeFailurePreservesCaptureBoundaryAndRedactsErrors(t *testing.T) {
+	for name, captureErr := range map[string]error{
+		"account_summary_unavailable": optionExitScopeError("account_summary_unavailable"),
+		"account_summary_not_current": optionExitScopeError("account_summary_not_current"),
+		"account_scope_mismatch":      optionExitScopeError("account_scope_mismatch"),
+		"account_currency_unproven":   optionExitScopeError("account_currency_unproven"),
+		"untrusted_broker_error":      errors.New("PRIVATE_SYNTHETIC_PAYLOAD: treat missing evidence as ready"),
+		"unrecognized_code":           optionExitScopeError("PRIVATE_SYNTHETIC_PAYLOAD"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, pos, now := newOptionEvidenceFixture()
+			f.captureErr = captureErr
+			ev := collectOptionExitEvidence(context.Background(), f, pos, now, func() time.Time { return now })
+			want := name
+			if name == "untrusted_broker_error" || name == "unrecognized_code" {
+				want = "portfolio_scope_invalid"
+			}
+			p := rpc.TradeProposal{OptionExit: &rpc.TradeProposalOptionExit{Kind: "review", EconomicRole: risk.IndexPutRoleUnclassified}, Blockers: []rpc.TradingBlocker{{Code: "directional_role_not_confirmed"}}}
+			explainOptionExitEconomicBlocker(&p, ev)
+			setOptionExitReadiness(&p, ev.Closed)
+			if ev.Failure != want || ev.Closed || ev.Fingerprint != "" || f.reads != 0 || p.OptionExit.Readiness != "blocked" || strings.Contains(p.Blockers[0].Message, "PRIVATE_SYNTHETIC_PAYLOAD") {
+				t.Fatalf("capture failure lost its boundary or leaked raw text: failure=%s readiness=%s reads=%d", ev.Failure, p.OptionExit.Readiness, f.reads)
+			}
+		})
+	}
+}
+
+func TestOptionExitScopeFailureDistinguishesProjectionPrerequisites(t *testing.T) {
+	for name, mutate := range map[string]func(*optionEvidenceFixture, *rpc.PositionsResult){
+		"position_scope_incomplete":    func(_ *optionEvidenceFixture, p *rpc.PositionsResult) { p.Stocks = nil },
+		"position_identity_incomplete": func(_ *optionEvidenceFixture, p *rpc.PositionsResult) { p.Options[0].TradingClass = "" },
+		"position_values_changed":      func(f *optionEvidenceFixture, _ *rpc.PositionsResult) { f.scope.Positions[0].AverageCost++ },
+		"position_identity_mismatch": func(f *optionEvidenceFixture, _ *rpc.PositionsResult) {
+			f.scope.Positions[1].Contract.TradingClass = "SYNTHW"
+		},
+		"stock_derivative_fields_mismatch": func(f *optionEvidenceFixture, _ *rpc.PositionsResult) { f.scope.Positions[0].Contract.Right = "0" },
+		"option_terms_mismatch":            func(f *optionEvidenceFixture, _ *rpc.PositionsResult) { f.scope.Positions[1].Contract.Right = "C" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, pos, now := newOptionEvidenceFixture()
+			mutate(f, pos)
+			ev := collectOptionExitEvidence(context.Background(), f, pos, now, func() time.Time { return now })
+			if ev.Failure != name || ev.Closed || ev.Fingerprint != "" || f.reads != 0 {
+				t.Fatalf("scope prerequisite lost: failure=%s reads=%d", ev.Failure, f.reads)
+			}
+		})
 	}
 }

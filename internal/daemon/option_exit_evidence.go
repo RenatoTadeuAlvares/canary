@@ -54,6 +54,12 @@ type optionExitBookEvidence struct {
 	Closed bool
 }
 
+// Only fixed prerequisite codes cross the evidence boundary; broker errors
+// may contain private fields or arbitrary text and are never projected.
+type optionExitScopeError string
+
+func (e optionExitScopeError) Error() string { return string(e) }
+
 type optionExitBrokerSource struct {
 	server    *Server
 	authority *orderPreviewBrokerAuthority
@@ -62,40 +68,63 @@ type optionExitBrokerSource struct {
 func (b optionExitBrokerSource) capture(ctx context.Context) (optionExitBookScope, error) {
 	a := b.authority
 	if !b.server.orderPreviewBrokerAuthorityCurrent(a) {
-		return optionExitBookScope{}, fmt.Errorf("broker session unavailable")
+		return optionExitBookScope{}, optionExitScopeError("broker_session_unavailable")
 	}
 	scope := b.server.currentBrokerStateScope()
 	projection, ok := a.connector.CapturePortfolioProjectionForSession(a.session)
 	if !ok {
-		return optionExitBookScope{}, fmt.Errorf("portfolio session unavailable")
+		return optionExitBookScope{}, optionExitScopeError("portfolio_session_unavailable")
 	}
 	account, provenance, err := a.connector.RequestAccountSummaryWithProvenance(ctx, orderFXQuoteBudget)
-	if err != nil || provenance != ibkr.AccountSummaryProvenanceRequest || account == nil ||
-		!strings.EqualFold(account.AccountID, scope.Account) || !account.BaseCurrencyProvenance.Proven() {
-		return optionExitBookScope{}, fmt.Errorf("explicit account currency unavailable")
+	if err != nil || account == nil {
+		return optionExitBookScope{}, optionExitScopeError("account_summary_unavailable")
+	}
+	if provenance != ibkr.AccountSummaryProvenanceRequest {
+		return optionExitBookScope{}, optionExitScopeError("account_summary_not_current")
+	}
+	if !strings.EqualFold(account.AccountID, scope.Account) {
+		return optionExitBookScope{}, optionExitScopeError("account_scope_mismatch")
+	}
+	if !account.BaseCurrencyProvenance.Proven() {
+		return optionExitBookScope{}, optionExitScopeError("account_currency_unproven")
 	}
 	base, ok := rulebookBaseCurrency(account.BaseCurrency)
 	if !ok {
-		return optionExitBookScope{}, fmt.Errorf("account currency unavailable")
+		return optionExitBookScope{}, optionExitScopeError("account_currency_unproven")
 	}
 	// Process-local connection identity is hashed before leaving the daemon.
 	// It is never reconstructed from persisted evidence or caller input.
 	out := optionExitBookScope{Scope: scope, Session: fmt.Sprintf("%p/%d/%v", a.connector, a.connectorEpoch, a.session),
 		SessionEpoch: a.session.Epoch(), Generation: projection.Generation, BaseCurrency: base, Positions: projection.Positions, Health: projection.Health,
 		Terminal: b.server.optionExitTerminalEvidence(projection.Positions, b.server.orderNow())}
-	if !b.current(out) {
-		return optionExitBookScope{}, fmt.Errorf("portfolio changed during capture")
+	if failure := b.currentFailure(out); failure != "" {
+		return optionExitBookScope{}, optionExitScopeError(failure)
 	}
 	return out, nil
 }
 
 func (b optionExitBrokerSource) current(scope optionExitBookScope) bool {
+	return b.currentFailure(scope) == ""
+}
+
+func (b optionExitBrokerSource) currentFailure(scope optionExitBookScope) string {
 	if !b.server.orderPreviewBrokerAuthorityCurrent(b.authority) || !sameBrokerScope(scope.Scope, b.server.currentBrokerStateScope()) {
-		return false
+		return "broker_session_unavailable"
 	}
 	p, ok := b.authority.connector.CapturePortfolioProjectionForSession(b.authority.session)
-	return ok && p.Generation == scope.Generation && optionExitEvidenceHash(scope.Terminal) == optionExitEvidenceHash(b.server.optionExitTerminalEvidence(p.Positions, b.server.orderNow())) && classifyPortfolioStreamHealth(scope.Scope, p.Health, b.server.orderNow()) == orderIntegrityHealthCurrent &&
-		cachedPositionsMatchBrokerScope(p.Positions, scope.Scope)
+	if !ok {
+		return "portfolio_session_unavailable"
+	}
+	if p.Generation != scope.Generation || optionExitEvidenceHash(scope.Terminal) != optionExitEvidenceHash(b.server.optionExitTerminalEvidence(p.Positions, b.server.orderNow())) {
+		return "portfolio_scope_changed"
+	}
+	if classifyPortfolioStreamHealth(scope.Scope, p.Health, b.server.orderNow()) != orderIntegrityHealthCurrent {
+		return "portfolio_stream_unavailable"
+	}
+	if !cachedPositionsMatchBrokerScope(p.Positions, scope.Scope) {
+		return "position_account_mismatch"
+	}
+	return ""
 }
 
 func (b optionExitBrokerSource) option(ctx context.Context, contract rpc.ContractParams) (*ibkr.OptionRiskMeasurement, error) {
@@ -226,13 +255,13 @@ func optionExitContract(row rpc.PositionView) (rpc.ContractParams, bool) {
 	return c, true
 }
 
-// optionExitScopeMatches requires every nonzero raw broker position to be
+// optionExitScopeFailure requires every nonzero raw broker position to be
 // represented exactly once. Unsupported instruments cannot silently shrink
 // the denominator. Average cost and every option identity field must agree.
-func optionExitScopeMatches(scope optionExitBookScope, pos *rpc.PositionsResult, now time.Time) bool {
+func optionExitScopeFailure(scope optionExitBookScope, pos *rpc.PositionsResult, now time.Time) string {
 	if pos == nil || !brokerScopeConcrete(scope.Scope) || scope.Session == "" || scope.SessionEpoch == 0 || scope.Generation == 0 || scope.BaseCurrency == "" ||
 		scope.Generation != scope.Health.ProjectionGeneration || classifyPortfolioStreamHealth(scope.Scope, scope.Health, now) != orderIntegrityHealthCurrent || !cachedPositionsMatchBrokerScope(scope.Positions, scope.Scope) {
-		return false
+		return "portfolio_scope_invalid"
 	}
 	rows := make(map[int]rpc.PositionView)
 	for _, row := range append(slices.Clone(pos.Stocks), pos.Options...) {
@@ -240,23 +269,23 @@ func optionExitScopeMatches(scope optionExitBookScope, pos *rpc.PositionsResult,
 			continue
 		}
 		if _, ok := optionExitContract(row); !ok {
-			return false
+			return "position_identity_incomplete"
 		}
 		if _, exists := rows[row.ConID]; exists {
-			return false
+			return "position_scope_incomplete"
 		}
 		rows[row.ConID] = row
 	}
 	seen := make(map[int]bool)
 	for _, raw := range scope.Positions {
 		if raw == nil {
-			return false
+			return "position_scope_incomplete"
 		}
 		if raw.Position == 0 {
 			continue
 		}
 		if seen[raw.Contract.ConID] {
-			return false
+			return "position_scope_incomplete"
 		}
 		seen[raw.Contract.ConID] = true
 		row, ok := rows[raw.Contract.ConID]
@@ -265,25 +294,36 @@ func optionExitScopeMatches(scope optionExitBookScope, pos *rpc.PositionsResult,
 			delete(rows, raw.Contract.ConID)
 			continue
 		}
-		if !ok || raw.Position != row.Quantity || raw.AverageCost != row.AvgCost {
-			return false
+		if !ok {
+			return "position_scope_incomplete"
+		}
+		if raw.Position != row.Quantity || raw.AverageCost != row.AvgCost {
+			return "position_values_changed"
 		}
 		c, _ := optionExitContract(row)
 		wire := raw.Contract
 		switch strings.ToUpper(strings.TrimSpace(wire.SecType)) {
 		case "STK", "STOCK", "ETF", "OPT", "OPTION":
 		default:
-			return false
+			return "position_identity_incomplete"
 		}
 		wire.SecType = positionWireSecType(wire.SecType)
 		if c.ConID != wire.ConID || c.Symbol != strings.ToUpper(strings.TrimSpace(wire.Symbol)) || c.SecType != wire.SecType ||
-			c.Currency != wire.Currency || c.LocalSymbol != wire.LocalSymbol || c.TradingClass != wire.TradingClass ||
-			c.Expiry != wire.Expiry || c.Right != wire.Right || c.Strike != wire.Strike || (c.SecType == "OPT" && c.Multiplier != wire.Multiplier) {
-			return false
+			c.Currency != wire.Currency || c.LocalSymbol != wire.LocalSymbol || c.TradingClass != wire.TradingClass {
+			return "position_identity_mismatch"
+		}
+		if c.Expiry != wire.Expiry || c.Right != wire.Right || c.Strike != wire.Strike || (c.SecType == "OPT" && c.Multiplier != wire.Multiplier) {
+			if c.SecType == "STK" {
+				return "stock_derivative_fields_mismatch"
+			}
+			return "option_terms_mismatch"
 		}
 		delete(rows, raw.Contract.ConID)
 	}
-	return len(rows) == 0
+	if len(rows) != 0 {
+		return "position_scope_incomplete"
+	}
+	return ""
 }
 
 func collectOptionExitEvidence(ctx context.Context, src optionExitEvidenceSource, pos *rpc.PositionsResult, now time.Time, clock func() time.Time) optionExitBookEvidence {
@@ -297,8 +337,14 @@ func collectOptionExitEvidence(ctx context.Context, src optionExitEvidenceSource
 	ctx, cancel := context.WithTimeout(ctx, optionExitEvidenceBudget)
 	defer cancel()
 	scope, err := src.capture(ctx)
-	if err != nil || !optionExitScopeMatches(scope, pos, clock()) {
+	if err != nil {
+		if failure, ok := err.(optionExitScopeError); ok && optionExitScopeFailureMessage(string(failure)) != "" {
+			out.Failure = string(failure)
+		}
 		return out
+	}
+	if failure := optionExitScopeFailure(scope, pos, clock()); failure != "" {
+		return fail(failure)
 	}
 	out.Scope, out.Generation = optionExitScopeHash(scope), scope.Generation
 	out.TerminalFingerprint = optionExitEvidenceHash(scope.Terminal)
@@ -425,7 +471,7 @@ func (e *proposalEngine) optionExitEvidence(ctx context.Context, pos *rpc.Positi
 	if src == nil {
 		a, err := e.server.captureOrderPreviewBrokerAuthority()
 		if err != nil || a == nil {
-			return optionExitBookEvidence{Failure: "portfolio_scope_invalid"}
+			return optionExitBookEvidence{Failure: "broker_session_unavailable"}
 		}
 		src = optionExitBrokerSource{server: e.server, authority: a}
 	}
@@ -499,6 +545,42 @@ func setOptionExitReadiness(p *rpc.TradeProposal, deferred bool) {
 	x.ReferencePrice, x.ReturnPct = nil, nil
 }
 
+func optionExitScopeFailureMessage(reason string) string {
+	switch reason {
+	case "broker_session_unavailable":
+		return "the broker connection changed or is not ready"
+	case "portfolio_session_unavailable":
+		return "positions could not be captured from the current broker connection"
+	case "account_summary_unavailable":
+		return "the fresh broker account-summary request failed or returned no account"
+	case "account_summary_not_current":
+		return "the broker returned cached account data instead of a completed fresh summary"
+	case "account_scope_mismatch":
+		return "the fresh account summary does not match the connected account"
+	case "account_currency_unproven":
+		return "the fresh account summary does not prove the account base currency"
+	case "portfolio_scope_changed":
+		return "positions or verified terminal-stock evidence changed during account capture"
+	case "portfolio_stream_unavailable":
+		return "the account-scoped portfolio stream is not current and complete"
+	case "position_account_mismatch":
+		return "a broker position does not match the connected account"
+	case "position_identity_incomplete":
+		return "a portfolio instrument is unsupported or lacks required contract identity"
+	case "position_scope_incomplete":
+		return "broker positions and the analysis portfolio do not contain the same complete set of unique contracts"
+	case "position_values_changed":
+		return "position quantity or cost basis differs between the broker and analysis portfolio"
+	case "position_identity_mismatch":
+		return "contract identity differs between the broker and analysis portfolio"
+	case "stock_derivative_fields_mismatch":
+		return "a broker stock carries option-only fields omitted by the analysis portfolio"
+	case "option_terms_mismatch":
+		return "option expiry, right, strike, or multiplier differs between the broker and analysis portfolio"
+	}
+	return ""
+}
+
 func explainOptionExitEconomicBlocker(p *rpc.TradeProposal, evidence optionExitBookEvidence) {
 	if p.OptionExit == nil {
 		return
@@ -526,6 +608,9 @@ func explainOptionExitEconomicBlocker(p *rpc.TradeProposal, evidence optionExitB
 			action = "Resolve market-calendar coverage before refreshing the exit check."
 		default:
 			message = "economic role is unclassified because the complete account and position scope is unavailable, invalid, or changed during measurement"
+			if detail := optionExitScopeFailureMessage(evidence.Failure); detail != "" {
+				message = "economic role is unclassified because " + detail
+			}
 			action = "Refresh broker account and positions, resolve unsupported or incomplete rows, and retry from one unchanged portfolio scope."
 		}
 	}
