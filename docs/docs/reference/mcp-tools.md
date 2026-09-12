@@ -137,9 +137,14 @@ Read official exchange sessions to plan work around market opens, closes, holida
 
 ## `canary_macro`
 
-Read cached economic releases, central-bank meetings and recent official publications for the trading day. Includes BLS, BEA, Federal Reserve and ECB sources with per-feed availability, original times and a bounded window. Missing or stale feeds do not mean nothing is scheduled. Preserve source_label/date-only precision and truncation. This is official-source coverage, not a licensed general-news or consensus feed. Use canary_calendar for exchange hours and canary_brief for the current book and risk. Read-only; does not fetch, acknowledge, schedule or trade.
+Read cached economic releases, central-bank meetings and recent official publications for the trading day. Includes BLS, BEA, Federal Reserve, New York Fed and ECB sources with per-feed availability, original times and a bounded window. Missing or stale feeds do not mean nothing is scheduled. Preserve source_label/date-only precision, per-source window bounds, failure streaks and list-specific events_truncated/publications_truncated flags; legacy truncated is their union. New York Fed supplies independent key-release backup; its success does not establish full BLS coverage. Use window_start/window_end to filter source-local calendar dates before response limits. This is official-source coverage, not a licensed general-news or consensus feed. Use canary_calendar for exchange hours and canary_brief for the current book and risk. Read-only; does not fetch, acknowledge, schedule or trade.
 
-*No parameters.*
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `window_end` | string | no | inclusive source-local YYYY-MM-DD; supply with window_start |
+| `window_start` | string | no | inclusive source-local YYYY-MM-DD; supply with window_end, at most 31 days; omitted window uses yesterday through next week |
 
 ## `canary_regime`
 

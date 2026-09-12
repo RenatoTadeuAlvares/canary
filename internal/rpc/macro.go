@@ -5,6 +5,14 @@ import "time"
 // MethodMacroSnapshot reads cached public economic and central-bank sources.
 const MethodMacroSnapshot = "macro.snapshot"
 
+// MacroSnapshotParams selects inclusive source-local calendar dates before
+// response limits. Both dates must be supplied together, spanning at most 31 days.
+// An omitted window retains the default yesterday-through-next-week overview.
+type MacroSnapshotParams struct {
+	WindowStart string `json:"window_start,omitempty"`
+	WindowEnd   string `json:"window_end,omitempty"`
+}
+
 // MacroEvent preserves a scheduled source date without inventing unknown times.
 type MacroEvent struct {
 	ID            string    `json:"id"`
@@ -43,6 +51,13 @@ type MacroSource struct {
 	LastSuccess  time.Time `json:"last_success,omitzero"`
 	ValidUntil   time.Time `json:"valid_until,omitzero"`
 	Coverage     string    `json:"coverage"`
+	// WindowStart and WindowEnd bound a calendar whose publisher supplies one month.
+	// Empty bounds mean the feed does not establish an explicit covered interval.
+	WindowStart         string    `json:"window_start,omitempty"`
+	WindowEnd           string    `json:"window_end,omitempty"`
+	ConsecutiveFailures int       `json:"consecutive_failures,omitempty"`
+	FirstFailure        time.Time `json:"first_failure,omitzero"`
+	NextAttempt         time.Time `json:"next_attempt,omitzero"`
 }
 
 // MacroSnapshotResult contains a bounded read of retained public-source evidence.
@@ -55,5 +70,10 @@ type MacroSnapshotResult struct {
 	Events         []MacroEvent       `json:"events"`
 	Publications   []MacroPublication `json:"publications"`
 	Sources        []MacroSource      `json:"sources"`
-	Truncated      bool               `json:"truncated"`
+	// EventsTruncated and PublicationsTruncated identify which returned list lost
+	// rows to response limits. They are always present, including when false.
+	EventsTruncated       bool `json:"events_truncated"`
+	PublicationsTruncated bool `json:"publications_truncated"`
+	// Truncated preserves the legacy union of both list-truncation flags.
+	Truncated bool `json:"truncated"`
 }

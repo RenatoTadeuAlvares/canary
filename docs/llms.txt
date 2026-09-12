@@ -1,6 +1,6 @@
 # Canary
 
-Updated: 2026-09-06
+Updated: 2026-09-12
 
 Canary is a local Interactive Brokers risk desk: a daemon, shell CLI, read-only
 MCP server, paired app, and public Go TWS API. The daemon
@@ -24,9 +24,10 @@ Use it for:
 The MCP server exposes read-only tools for status, trading status, settings,
 open orders, order history, one-order status, account, positions, option
 strategies, named-symbol technical analysis, detailed regime and portfolio stress, brief, broker-reporting status,
-Edge, rules, proposals, and opportunities. It has no MCP resources, settings writes, order previews, or
-execution tools. Market calendar,
-quote, event, breadth, and gamma engines remain daemon inputs. Use
+Edge, rules, proposals, opportunities, portfolio composition, reconciliation status,
+market quotes and price history, exchange sessions, and official macro calendars
+and publications. It has no MCP resources, settings writes, order previews, or
+execution tools. Breadth and gamma remain daemon inputs. Use
 `canary_regime` for the eight-indicator market dashboard and `canary_stress` for
 full portfolio-risk evidence; the daily brief remains the summary.
 

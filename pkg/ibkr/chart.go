@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// ChartMaxBars bounds both acquisition and the returned chart series.
+const ChartMaxBars = 2000
+
 // ChartSeries preserves the actual resolved identity and requested price basis.
 type ChartSeries struct {
 	Contract   Contract
@@ -38,7 +41,7 @@ func (c *Connector) FetchChartBars(ctx context.Context, contract Contract, days 
 	if contract.SecType == "CASH" {
 		result.WhatToShow = "MIDPOINT"
 	}
-	result.Bars, err = c.fetchHistoricalWithContractOptions(ctx, resolved.Contract.Symbol, resolved.Contract, days, timeout, result.WhatToShow, historicalRequestOptions{formatDate: 2, chartBarSize: interval, chartOutsideRTH: interval != "1 day", strictDaily: true, waitForEnd: true})
+	result.Bars, err = c.fetchHistoricalWithContractOptions(ctx, resolved.Contract.Symbol, resolved.Contract, days, timeout, result.WhatToShow, historicalRequestOptions{formatDate: 2, chartBarSize: interval, chartOutsideRTH: interval != "1 day", strictDaily: true, waitForEnd: true, maxBars: ChartMaxBars})
 	if !c.SessionCurrent(binding) {
 		return ChartSeries{}, fmt.Errorf("broker session changed during history")
 	}

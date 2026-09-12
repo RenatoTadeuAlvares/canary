@@ -178,6 +178,8 @@ func (s *Server) populateStreaksWithStore(res *rpc.RegimeSnapshotResult, streaks
 		switch key {
 		case rpc.RegimeIndicatorVIXTerm:
 			freshnessClass = vixTermCadenceClass(res, now)
+		case rpc.RegimeIndicatorVolOfVol:
+			freshnessClass = volOfVolCadenceClass(res, now)
 		case rpc.RegimeIndicatorUSDJPY:
 			freshnessClass = usdJpyCadenceClass(res, now)
 		case rpc.RegimeIndicatorGammaZero:
@@ -210,6 +212,9 @@ func (s *Server) populateStreaksWithStore(res *rpc.RegimeSnapshotResult, streaks
 		freshness := &rpc.RegimeFreshness{
 			Class:         freshnessClass,
 			MaxAgeSeconds: rpc.RegimeSourceMaxAgeSeconds(rpc.RegimeIndicatorCluster(key)),
+		}
+		if key == rpc.RegimeIndicatorVolOfVol && freshnessClass == rpc.RegimeFreshnessNotDue {
+			freshness.NextDueAt = volOfVolNextDue(res, now)
 		}
 		// A reading may change only because the measured thing changed. When
 		// the row's banding inputs are absent — the market is shut, or TWS

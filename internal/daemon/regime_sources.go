@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/osauer/canary/v2/internal/publichttp"
 )
 
 type regimeSeriesPoint struct {
@@ -73,7 +75,7 @@ func fetchFedDDPSeries(ctx context.Context, endpoint, valueColumn string) ([]reg
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "Go-http-client/1.1")
+	publichttp.SetUserAgent(req)
 	resp, err := regimeHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -200,7 +202,7 @@ func fetchTreasury13WeekBillMonth(ctx context.Context, month string) ([]regimeSe
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "Go-http-client/1.1")
+	publichttp.SetUserAgent(req)
 	resp, err := regimeTreasuryHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -267,10 +269,7 @@ func fetchCSVSeries(ctx context.Context, endpoint, valueColumn, dateLayout strin
 	if err != nil {
 		return nil, err
 	}
-	// FRED's Akamai edge has been observed resetting streams for a custom
-	// product UA while accepting Go/curl defaults. Use Go's conventional UA
-	// so official daily rows do not flap unavailable solely from edge policy.
-	req.Header.Set("User-Agent", "Go-http-client/1.1")
+	publichttp.SetUserAgent(req)
 	resp, err := regimeHTTPClient.Do(req)
 	if err != nil {
 		return nil, err

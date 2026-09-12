@@ -22,6 +22,7 @@ import (
 
 	"github.com/osauer/canary/v2/internal/daemon/corestore"
 	"github.com/osauer/canary/v2/internal/marketcal"
+	"github.com/osauer/canary/v2/internal/publichttp"
 	ibkrlib "github.com/osauer/canary/v2/pkg/ibkr"
 
 	"github.com/osauer/canary/v2/internal/rpc"
@@ -574,7 +575,7 @@ func fetchNasdaqRegSHO(ctx context.Context, endpoint string) (marketEventRegSHOE
 	if err != nil {
 		return marketEventRegSHOEntry{}, err
 	}
-	req.Header.Set("User-Agent", "Go-http-client/1.1")
+	publichttp.SetUserAgent(req)
 	resp, err := marketEventsHTTPClient.Do(req)
 	if err != nil {
 		return marketEventRegSHOEntry{}, err
@@ -1049,7 +1050,7 @@ func fetchNasdaqTradeHalts(ctx context.Context) (marketEventHaltsEntry, error) {
 	if err != nil {
 		return marketEventHaltsEntry{}, err
 	}
-	req.Header.Set("User-Agent", "Go-http-client/1.1")
+	publichttp.SetUserAgent(req)
 	resp, err := marketEventsHTTPClient.Do(req)
 	if err != nil {
 		return marketEventHaltsEntry{}, err

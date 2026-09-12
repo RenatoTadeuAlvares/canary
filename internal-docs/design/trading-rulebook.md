@@ -405,12 +405,11 @@ web/app/*                         rules card + drill-in
   (≤4), an 8s provider budget, and durable per-provider outcome/backoff state.
   Transport failure alone may retain a last-good date as stale; an explicit
   no-date, unsupported-security, schema change, or provider conflict cannot
-  hide behind LKG. Nasdaq endpoint spike (2026-07-07, empirical):
-  `Go-http-client/1.1` is reset at connection level by api.nasdaq.com
-  (exit 000 in 0.17s); a browser-identifying UA with `Accept:
-  application/json` returns 200 in ~2–3s. The fetcher therefore sends a
-  browser-style UA — a deliberate, documented choice, not the spx-fetcher
-  convention. Both provider parsers are strict; any ambiguity becomes a typed
+  hide behind LKG. The shared `internal/publichttp` request policy deliberately
+  suppresses User-Agent for `api.nasdaq.com`, preserving the later working
+  compatibility observation. Accept and Accept-Language remain source-specific;
+  the fetcher sends no Origin or Referer. The earlier browser-UA experiment was
+  superseded by this empty-UA policy. Both provider parsers are strict; any ambiguity becomes a typed
   unknown plus source degradation, never a guessed date. Nasdaq symbol mapping
   is an explicit tested function (IBKR `BRK B` → Nasdaq `BRK.B`). IBKR WSH is
   requested through serialized metadata/event reads and requires the account's

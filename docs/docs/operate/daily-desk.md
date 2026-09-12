@@ -1,6 +1,6 @@
 # The daily desk
 
-Updated: 2026-09-06
+Updated: 2026-09-11
 
 The recurring loop, in the order a trading day runs it. Each command is followed by the decision it supports. [Your first session](../start/first-session.md) explains what these screens contain; this page assumes you already know and only tells you when to look.
 
@@ -62,6 +62,31 @@ times, thresholds, calibration status, and independent source diagnostics.
 `stress --details` includes quiet evidence rows and operational diagnostics.
 Unavailable Stress keeps a nonzero exit status. JSON and the matching read-only
 MCP tools retain full typed evidence.
+
+Use `canary macro --json` for cached economic dates and official publications.
+For an overnight review, supply `--window-start YYYY-MM-DD --window-end YYYY-MM-DD`
+(both inclusive, at most 31 days). Filtering happens before response limits;
+`events_truncated` means economic event rows were omitted; `publications_truncated`
+only describes the headline list. Legacy `truncated` is true if either list lost
+rows. Older responses without list-specific flags must be treated conservatively.
+Dates use each event's source timezone, with exact instants retained when supplied.
+
+The [BLS calendar](https://www.bls.gov/help/hlpiCAL.htm) is public: its calendar
+subscription does not require a paid entitlement or the separate BLS time-series
+API registration. Failed primary reads remain visible. The independent
+[New York Fed calendar](https://www.newyorkfed.org/research/calendars/nationalecon_cal.html)
+supplies key-release backup with its own source identity and published month
+bounds, including the next published month when the coming week crosses month end.
+Its numeric 01–12 time labels omit a meridiem and remain `source_label`;
+they do not become invented overnight instants. It does not establish complete
+BLS coverage. Missing, stale or out-of-window
+sources keep coverage partial, even when a useful event is available elsewhere.
+
+Failures preserve last-good event clocks and expire normally. Repeated failures
+back off from five minutes to at most an hour; `consecutive_failures`,
+`first_failure` and `next_attempt` survive restart. These fields describe the
+current observed failure streak; an older retained record without those fields
+cannot establish when a failure first began. A successful read clears the streak.
 
 A stale Regime snapshot labels readings as recorded context; a retained green
 band is not a current rating. The default view keeps thresholds and long source

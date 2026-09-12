@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/osauer/canary/v2/internal/daemon/corestore"
+	"github.com/osauer/canary/v2/internal/publichttp"
 	"github.com/osauer/canary/v2/internal/rpc"
 )
 
@@ -841,10 +842,8 @@ func (c *earningsCache) fetchOne(ctx context.Context, sym string) (earningsEntry
 	if err != nil {
 		return earningsEntry{}, providerOutcomeError(rpc.EarningsStatusTransportFailure, rpc.SourceFailureInvalidPayload, rpc.SourceFailureStageNasdaqRequest, false, err)
 	}
-	// Nasdaq's edge rejects any client that names itself, including an honest
-	// the live endpoint, those headers never affected acceptance, and they
+	publichttp.SetUserAgent(req)
 	for k, v := range map[string]string{
-		"User-Agent":      "",
 		"Accept":          "application/json, text/plain, */*",
 		"Accept-Language": "en-US,en;q=0.9",
 	} {

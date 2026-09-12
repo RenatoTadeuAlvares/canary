@@ -631,6 +631,7 @@ type historicalResult struct {
 }
 
 type historicalRequest struct {
+	maxBars                    int
 	intraday                   bool
 	symbol                     string
 	result                     chan historicalResult
@@ -6212,6 +6213,10 @@ func (c *Connector) handleHistoricalData(fields []string) {
 		c.failHistoricalRequest(reqID, &HistoricalDataValidationError{Reason: "invalid_bar_count"})
 		return
 	}
+	if req.maxBars > 0 && count > req.maxBars {
+		c.failHistoricalRequest(reqID, &HistoricalDataValidationError{Reason: "series_size_limit"})
+		return
+	}
 	bars, parseErr := parseHistoricalBars(fields, &idx, count, req.strictDaily)
 	if parseErr != nil {
 		c.failHistoricalRequest(reqID, parseErr)
@@ -6243,7 +6248,15 @@ func historicalPayloadConsumed(fields []string, idx int) bool {
 }
 
 func parseHistoricalBars(fields []string, idx *int, count int, strictDaily bool) ([]HistoricalBar, error) {
-	bars := make([]HistoricalBar, 0, max(count, 0))
+	// Each bar needs eight fields. Validate before trusting a wire count as an
+	// allocation size, including for legacy non-strict callers.
+	if count < 0 {
+		return nil, &HistoricalDataValidationError{Reason: "invalid_bar_count"}
+	}
+	if *idx < 0 || *idx > len(fields) || count > (len(fields)-*idx)/8 {
+		return nil, &HistoricalDataValidationError{Reason: "truncated_bar"}
+	}
+	bars := make([]HistoricalBar, 0, count)
 	for range count {
 		if *idx >= len(fields) {
 			if strictDaily {
@@ -6416,6 +6429,7 @@ func (c *Connector) getHistoricalRequest(reqID int) *historicalRequest {
 }
 
 type historicalRequestOptions struct {
+	maxBars                    int
 	chartBarSize               string
 	chartOutsideRTH            bool
 	strictDaily                bool
@@ -6431,6 +6445,7 @@ func (c *Connector) createHistoricalRequestWithOptions(reqID int, symbol string,
 		intraday: options.chartBarSize != "" && options.chartBarSize != "1 day", symbol: symbol,
 		result:                     make(chan historicalResult, 1),
 		strictDaily:                options.strictDaily,
+		maxBars:                    options.maxBars,
 		waitForEnd:                 options.waitForEnd,
 		requestOwnsNoticeCollision: options.requestOwnsNoticeCollision,
 		connection:                 options.session.connection,
@@ -6449,6 +6464,9 @@ func (c *Connector) bufferHistoricalResult(reqID int, res historicalResult) erro
 	req := c.historicalReqs[reqID]
 	if req == nil {
 		return nil
+	}
+	if req.maxBars > 0 && len(res.bars) > req.maxBars-len(req.bufferedBars) {
+		return &HistoricalDataValidationError{Reason: "series_size_limit"}
 	}
 	if req.strictDaily {
 		barKey := func(bar HistoricalBar) string {

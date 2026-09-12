@@ -216,7 +216,7 @@ func init() {
 		{"market", "Observed benchmark and held-underlying quotes; bounded price history", "canary market [--symbol SYMBOL --range 1D] [--json]", runMarket},
 		{"technical", "Trend, relative strength, ATR, and liquidity from daily bars", "canary technical SYM[,SYM...] [--benchmark SPY] [--market us|de] [--json]", runTechnical},
 		{"calendar", "Official exchange sessions, holidays, early closes, and coverage bounds", "canary calendar [--market us|us-options|de] [--date YYYY-MM-DD] [--at RFC3339] [--days N] [--json]", runCalendar},
-		{"macro", "Public economic calendar, official publications and source coverage", "canary macro [--json]", runMacro},
+		{"macro", "Public economic calendar, official publications and source coverage", "canary macro [--window-start DATE --window-end DATE] [--json]", runMacro},
 		{"regime", "Detailed broad-market regime across volatility, credit, funding, FX, gamma, and breadth", "canary regime [--explain] [--json [--view full|monitor] [--profiles]]", runRegime},
 		{"stress", "Portfolio stress with margin, exposure, concentration, options, protection, and source evidence", "canary stress [--details] [--json]", runStress},
 		{"brief", "Combined post- and pre-trade operator brief with disclosed source degradation", "canary brief [--details] [--json]", runBrief},

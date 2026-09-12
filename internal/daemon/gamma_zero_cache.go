@@ -315,12 +315,11 @@ func (c *gammaZeroCache) loadPersisted() {
 				continue
 			}
 			if stale == nil {
-				// Commonest cold of all — a desk that has never completed a
-				// gamma compute. It was also the only one with no reason
-				// attached, so the rare load failures below explained
+				// Absence also includes snapshots rejected for an incompatible
+				// method or format; it does not prove this desk never computed.
 				slot.setColdReason(
 					"no_persisted_cache",
-					fmt.Sprintf("no gamma computation has completed yet for %s on this desk", scope),
+					fmt.Sprintf("no compatible saved gamma snapshot for %s under the current methodology", scope),
 					gammaColdCacheAction,
 				)
 				continue

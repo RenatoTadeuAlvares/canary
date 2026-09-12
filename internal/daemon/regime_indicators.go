@@ -478,13 +478,47 @@ func (volOfVolStreaks) depth(res *rpc.RegimeSnapshotResult) *float64 {
 	return res.VolOfVol.Last
 }
 
-// VVIX freshness: the official daily close, allowing weekend + publication
-// lag. Beyond ~4 calendar days a newer close must exist.
+// VVIX's ordinary freshness budget includes weekend + publication lag.
 func (volOfVolStreaks) fresh(res *rpc.RegimeSnapshotResult, nowNY time.Time) bool {
 	if res.VolOfVol.Status != rpc.RegimeStatusOK {
 		return false
 	}
 	return officialDateWithinDays(res.VolOfVol.AsOfDate, nowNY, 4)
+}
+
+// volOfVolCadenceClass preserves the ordinary age budget but recognizes the
+// exact latest completed options session across a long holiday weekend. That
+// dated close is non-confirming context, never another banked stress session.
+func volOfVolCadenceClass(res *rpc.RegimeSnapshotResult, now time.Time) string {
+	if res == nil || now.IsZero() || res.VolOfVol.Status != rpc.RegimeStatusOK {
+		return rpc.RegimeFreshnessOverdue
+	}
+	row := res.VolOfVol
+	date, err := time.Parse("2006-01-02", row.AsOfDate)
+	if err != nil || date.After(now) || row.Last == nil || *row.Last <= 0 || math.IsNaN(*row.Last) || math.IsInf(*row.Last, 0) {
+		return rpc.RegimeFreshnessOverdue
+	}
+	if (volOfVolStreaks{}).fresh(res, now) {
+		return rpc.RegimeFreshnessFresh
+	}
+	if volOfVolNextDue(res, now) != nil {
+		return rpc.RegimeFreshnessNotDue
+	}
+	return rpc.RegimeFreshnessOverdue
+}
+
+func volOfVolNextDue(res *rpc.RegimeSnapshotResult, now time.Time) *time.Time {
+	completed, current, ok := lastCompletedOptionsSession(now)
+	if !ok || res.VolOfVol.AsOfDate != completed {
+		return nil
+	}
+	if current.Close.After(now) {
+		return &current.Close
+	}
+	if current.NextClose != nil && current.NextClose.After(now) {
+		return current.NextClose
+	}
+	return nil
 }
 
 // Exit hysteresis: leave red below 105.

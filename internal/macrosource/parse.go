@@ -73,6 +73,7 @@ func parseICS(s Spec, raw string, now time.Time) (Batch, error) {
 	}
 	out := Batch{}
 	var row rpc.MacroEvent
+	var blsEastern *time.Location
 	in := false
 	for _, l := range unfolded {
 		if l == "BEGIN:VEVENT" {
@@ -113,6 +114,22 @@ func parseICS(s Spec, raw string, now time.Time) (Batch, error) {
 		if row.Date != "" {
 			return Batch{}, errors.New("calendar event has multiple start dates")
 		}
+		zone := s.Timezone
+		hasZone := false
+		for _, param := range strings.Split(key, ";")[1:] {
+			if after, ok0 := strings.CutPrefix(param, "TZID="); ok0 {
+				if hasZone || strings.Trim(after, `"`) == "" {
+					return Batch{}, errors.New("calendar timezone parameters invalid")
+				}
+				hasZone = true
+				zone = strings.Trim(after, `"`)
+			}
+		}
+		// RFC 5545 forbids TZID on UTC instants and date-only values. Do not
+		// silently select one of two contradictory clock declarations.
+		if hasZone && (len(value) == 8 || strings.HasSuffix(value, "Z")) {
+			return Batch{}, errors.New("calendar timezone contradicts start value")
+		}
 		if len(value) == 8 {
 			d, err := time.Parse("20060102", value)
 			if err != nil {
@@ -122,13 +139,16 @@ func parseICS(s Spec, raw string, now time.Time) (Batch, error) {
 			row.TimePrecision = "date"
 			continue
 		}
-		zone := s.Timezone
-		for _, param := range strings.Split(key, ";")[1:] {
-			if after, ok0 := strings.CutPrefix(param, "TZID="); ok0 {
-				zone = strings.Trim(after, `"`)
+		var loc *time.Location
+		var err error
+		if zone == "US-Eastern" {
+			if blsEastern == nil {
+				blsEastern, err = blsEasternLocation(s, unfolded)
 			}
+			loc = blsEastern
+		} else {
+			loc, err = time.LoadLocation(zone)
 		}
-		loc, err := time.LoadLocation(zone)
 		if err != nil {
 			return Batch{}, errors.New("calendar timezone unsupported")
 		}
@@ -138,8 +158,18 @@ func parseICS(s Spec, raw string, now time.Time) (Batch, error) {
 			loc = time.UTC
 		}
 		at, err := time.ParseInLocation(layout, value, loc)
-		if err != nil {
+		if err != nil || zone == "US-Eastern" && at.Year() < 2007 {
 			return Batch{}, errors.New("calendar instant invalid")
+		}
+		// ParseInLocation can normalize a nonexistent spring-forward hour.
+		if zone == "US-Eastern" && !strings.HasSuffix(value, "Z") && at.Format(layout) != value {
+			return Batch{}, errors.New("calendar local instant does not exist")
+		}
+		// Go does not promise which repeated-hour occurrence it chooses.
+		// The supported profile has a one-hour fallback; iCalendar chooses
+		// the earlier occurrence when the wall clock occurs twice.
+		if zone == "US-Eastern" && at.Add(-time.Hour).Format(layout) == value {
+			at = at.Add(-time.Hour)
 		}
 		row.Date = at.Format(time.DateOnly)
 		row.ScheduledAt = at
@@ -150,6 +180,51 @@ func parseICS(s Spec, raw string, now time.Time) (Batch, error) {
 	}
 	return out, nil
 }
+
+// blsEasternLocation accepts BLS's declared post-2007 US DST profile, not an
+// arbitrary alias or timezone definition that happens to use the same name.
+func blsEasternLocation(s Spec, lines []string) (*time.Location, error) {
+	if s.ID != "bls-calendar" || s.URL != "https://www.bls.gov/schedule/news_release/bls.ics" || s.Timezone != "America/New_York" {
+		return nil, errors.New("calendar timezone unsupported")
+	}
+	start, end := -1, -1
+	for i, line := range lines {
+		switch line {
+		case "BEGIN:VTIMEZONE":
+			if start != -1 {
+				return nil, errors.New("calendar timezone definition ambiguous")
+			}
+			start = i
+		case "END:VTIMEZONE":
+			if start == -1 || end != -1 {
+				return nil, errors.New("calendar timezone definition incomplete")
+			}
+			end = i
+		}
+	}
+	const declared = `BEGIN:VTIMEZONE
+TZID:US-Eastern
+BEGIN:DAYLIGHT
+TZOFFSETFROM:-0500
+TZOFFSETTO:-0400
+DTSTART:20070311T020000
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU
+TZNAME:EDT
+END:DAYLIGHT
+BEGIN:STANDARD
+TZOFFSETFROM:-0400
+TZOFFSETTO:-0500
+DTSTART:20071104T020000
+RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU
+TZNAME:EST
+END:STANDARD
+END:VTIMEZONE`
+	if start == -1 || end <= start || strings.Join(lines[start:end+1], "\n") != declared {
+		return nil, errors.New("calendar timezone definition unsupported")
+	}
+	return time.LoadLocation("America/New_York")
+}
+
 func parseFed(s Spec, b []byte, now time.Time) (Batch, error) {
 	var doc struct {
 		Events []struct{ Month, Days, Title, Time, Type string }

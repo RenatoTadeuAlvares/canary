@@ -53,7 +53,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	symbols, asOf, err := spx.FetchAndParse(ctx, url, "refresh-spx-members/1.0")
+	symbols, asOf, err := spx.FetchAndParse(ctx, url)
 	if err != nil {
 		log.Fatalf("fetch/parse %s: %v", url, err)
 	}

@@ -9,6 +9,8 @@ import (
 func runMacro(ctx context.Context, env *Env, args []string) int {
 	fs := flagSet(env, "macro")
 	jsonOut := fs.Bool("json", false, "emit retained public calendar, publications and source coverage")
+	start := fs.String("window-start", "", "inclusive source-local YYYY-MM-DD; supply with --window-end, at most 31 days")
+	end := fs.String("window-end", "", "inclusive source-local YYYY-MM-DD; supply with --window-start")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
@@ -16,7 +18,7 @@ func runMacro(ctx context.Context, env *Env, args []string) int {
 		return failUnexpectedArgs(env, fs)
 	}
 	var out rpc.MacroSnapshotResult
-	if err := env.Conn.Call(ctx, rpc.MethodMacroSnapshot, struct{}{}, &out); err != nil {
+	if err := env.Conn.Call(ctx, rpc.MethodMacroSnapshot, rpc.MacroSnapshotParams{WindowStart: *start, WindowEnd: *end}, &out); err != nil {
 		return fail(env, "macro: %v", err)
 	}
 	if *jsonOut {

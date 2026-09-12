@@ -604,17 +604,23 @@ func regimeClusterWithinMaxAge(r RegimeSnapshotResult, name string) bool {
 	if len(metas) == 0 {
 		return false
 	}
-	values := make([]RegimeAsOfSummary, 0, len(metas))
-	for _, meta := range metas {
-		values = append(values, metaAsOf(meta))
-	}
-	asOf := weakestRegimeAsOf(values)
 	now := r.AsOf
-	if now.IsZero() || asOf.IsZero() {
-		// No measurable age. The bound cannot fire, and inventing staleness
-		return true
+	for i, meta := range metas {
+		asOf := metaAsOf(meta).Time
+		// Only the VVIX daily-close producer supplies this calendar proof.
+		// Other rows retain their original wall-clock bound.
+		if strings.EqualFold(name, "vol") && i == 1 && meta.Freshness != nil &&
+			meta.Freshness.Class == RegimeFreshnessNotDue && meta.Freshness.NextDueAt != nil {
+			if now.IsZero() || !now.Before(*meta.Freshness.NextDueAt) {
+				return false
+			}
+			continue
+		}
+		if !now.IsZero() && !asOf.IsZero() && now.Sub(asOf) >= time.Duration(maxAge)*time.Second {
+			return false
+		}
 	}
-	return now.Sub(asOf) < time.Duration(maxAge)*time.Second
+	return true
 }
 
 // gammaBlockedOnSessionCadenceOnly reports whether the only thing keeping a

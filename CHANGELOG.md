@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented here. The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html), and release entries follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) categories (Added / Changed / Deprecated / Removed / Fixed / Security).
 
+## v3.5.0 — 2026-09-12 08:57 CEST
+
+### What's new
+
+- **Market context is available to continuous desk workflows.** New read-only CLI and MCP tools provide benchmark and held-underlying quotes, bounded price history, portfolio composition, reconciliation status, and exchange sessions and closures. Quotes and charts retain their actual instruments, source times, price basis, and missing-data states.
+- **Official macro calendars and publications are cached by the daemon.** BLS, BEA, Federal Reserve, ECB, and New York Fed calendars support bounded date windows, with separate publication feeds and visible source health. Failed downloads retain dated last-good data and retry automatically.
+
+### Changed
+
+- **Regime supports compact reads for agent workflows.** Full evidence and source quality remain available through the detailed view.
+- **Risk decisions and broker-write authority are unchanged.** Portfolio composition reports current valuation; it does not replace risk exposure or statement performance.
+
+### Fixed
+
+- **Volatility no longer appears overdue during a US holiday before the next publication is due.** The latest completed close remains dated, nonconfirming context. (#41)
+- **Official calendar downloads handle BLS timezones, BEA XML feeds, and New York Fed month transitions correctly.** BLS downloads use a tested browser-compatible request header.
+- **Price history preserves month-end ranges and rejects oversized responses during acquisition.**
+- **Gamma diagnostics distinguish an incompatible saved snapshot from a snapshot that has never been computed.**
+
+### Security
+
+- **Public-data downloads no longer send the owner's personal GitHub link in User-Agent headers.** A shared destination policy preserves each source's compatible request identity without adding personal contact details.
+
 ## v3.4.1 — 2026-09-06 10:00 CEST
 
 ### What's new

@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -663,6 +664,8 @@ func BuildRegimeSourceHealth(r *RegimeSnapshotResult, now time.Time) []SourceHea
 	if now.IsZero() {
 		now = r.AsOf
 	}
+	currencyView := *r
+	currencyView.AsOf = now
 	bands := BuildRegimeClusterBands(r).Confirmed
 	volPartial := regimeSourceMissingRequiredFields(r.VIXTermStructure.Status, r.VIXTermStructure.Band, r.VIXTermStructure.FieldsMissing)
 	creditPartial := regimeSourceMissingRequiredFields(r.HYGSPYDivergence.Status, r.HYGSPYDivergence.Band, r.HYGSPYDivergence.FieldsMissing) ||
@@ -686,8 +689,13 @@ func BuildRegimeSourceHealth(r *RegimeSnapshotResult, now time.Time) []SourceHea
 	for _, row := range rows {
 		asOf := weakestRegimeAsOf(row.asOf)
 		status := regimeSourceStatus(row.statuses, row.band, row.qualityStatus, row.partial)
+		if row.name == "vol" && status == SourceStatusOK && r.VolOfVol.Freshness != nil &&
+			r.VolOfVol.Freshness.Class == RegimeFreshnessNotDue && r.VolOfVol.Freshness.NextDueAt != nil &&
+			!now.Before(*r.VolOfVol.Freshness.NextDueAt) {
+			status = SourceStatusStale
+		}
 		refreshState := ""
-		if class, scheduled := RegimeClusterScheduledContext(*r, row.name); scheduled {
+		if class, scheduled := RegimeClusterScheduledContext(currencyView, row.name); scheduled {
 			// Keep the raw row stale for evidence honesty, but normalize the
 			// aggregate source state: no newer observation is being served
 			// because the window is closed (not_due) or its refresh is in
@@ -932,10 +940,12 @@ func regimeSourceHealthGrade(r RegimeSnapshotResult, name string) string {
 	if !ok {
 		return RegimeCurrencyGradeFatal
 	}
-	if health.MaxAgeSeconds > 0 && health.AgeSeconds >= health.MaxAgeSeconds {
+	scheduled, isScheduled := RegimeClusterScheduledContext(r, name)
+	calendarClose := isScheduled && name == "vol" && r.VolOfVol.Freshness != nil &&
+		r.VolOfVol.Freshness.Class == RegimeFreshnessNotDue && r.VolOfVol.Freshness.NextDueAt != nil
+	if health.MaxAgeSeconds > 0 && health.AgeSeconds >= health.MaxAgeSeconds && !calendarClose {
 		return RegimeCurrencyGradeFatal
 	}
-	scheduled, isScheduled := RegimeClusterScheduledContext(r, name)
 	switch strings.ToLower(strings.TrimSpace(health.Status)) {
 	case SourceStatusOK:
 	case SourceStatusStale:
@@ -1065,7 +1075,9 @@ func RegimeClusterScheduledContext(r RegimeSnapshotResult, name string) (string,
 	switch name {
 	case "vol":
 		ok = len(rows) == 2 &&
-			regimeLifecycleRowCurrent(rows[1]) &&
+			(regimeLifecycleRowCurrent(rows[1]) ||
+				(rows[1].status == RegimeStatusOK && rows[1].freshness != nil && rows[1].freshness.Class == RegimeFreshnessNotDue &&
+					r.VolOfVol.Last != nil && *r.VolOfVol.Last > 0 && !math.IsNaN(*r.VolOfVol.Last) && !math.IsInf(*r.VolOfVol.Last, 0))) &&
 			!regimeSourceMissingRequiredFields(r.VIXTermStructure.Status, r.VIXTermStructure.Band, r.VIXTermStructure.FieldsMissing)
 	case "fx":
 		ok = len(rows) == 1 &&

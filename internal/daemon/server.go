@@ -775,9 +775,8 @@ func (s *Server) installMembersRefresher() {
 	}
 	_ = enabled // refresher derives state from the Pinned* flags
 
-	version := s.version
 	fetch := func(ctx context.Context) ([]string, time.Time, error) {
-		return spx.FetchAndParse(ctx, spx.WikipediaURL, version)
+		return spx.FetchAndParse(ctx, spx.WikipediaURL)
 	}
 	s.membersRefresher = spx.NewRefresher(spx.RefresherOptions{
 		Engine:         s.breadth,
@@ -2311,7 +2310,7 @@ func (s *Server) dispatch(ctx context.Context, req *rpc.Request, enc *json.Encod
 	case rpc.MethodTechnical:
 		s.unary(req, enc, func() (any, error) { return s.handleTechnical(ctx, req) })
 	case rpc.MethodMacroSnapshot:
-		s.unary(req, enc, func() (any, error) { return s.handleMacroSnapshot(), nil })
+		s.unary(req, enc, func() (any, error) { return s.handleMacroRequest(*req) })
 	case rpc.MethodMarketCalendar:
 		s.unary(req, enc, func() (any, error) { return s.handleMarketCalendar(req) })
 	case rpc.MethodBreadthSPX:

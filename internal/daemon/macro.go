@@ -91,6 +91,12 @@ func (s *Server) refreshMacroSource(ctx context.Context, c *macroCache, spec mac
 		return
 	}
 	at := s.orderNow().UTC()
+	c.mu.RLock()
+	priorAttempt := c.records[spec.ID].Source.NextAttempt
+	c.mu.RUnlock()
+	if at.Before(priorAttempt) {
+		return
+	}
 	batch, err := c.client.Fetch(ctx, spec, at)
 	if ctx.Err() != nil {
 		return
@@ -101,10 +107,19 @@ func (s *Server) refreshMacroSource(ctx context.Context, c *macroCache, spec mac
 	c.mu.RLock()
 	row := c.records[spec.ID]
 	c.mu.RUnlock()
+	if at.Before(row.Source.NextAttempt) {
+		return
+	}
 	row.Source.LastAttempt = at
 	if err != nil {
 		row.Source.Availability = "unavailable"
 		row.Source.Detail = err.Error()
+		if row.Source.ConsecutiveFailures == 0 {
+			row.Source.FirstFailure = at
+		}
+		row.Source.ConsecutiveFailures++
+		delay := 5 * time.Minute << min(row.Source.ConsecutiveFailures-1, 4)
+		row.Source.NextAttempt = at.Add(min(delay, time.Hour))
 	} else {
 		row.Batch = batch
 		row.Source.Availability = "available"
@@ -112,6 +127,10 @@ func (s *Server) refreshMacroSource(ctx context.Context, c *macroCache, spec mac
 		row.Source.LastSuccess = at
 		row.Source.ValidUntil = at.Add(macroFreshness)
 		row.Source.Stale = false
+		row.Source.FirstFailure = time.Time{}
+		row.Source.ConsecutiveFailures = 0
+		row.Source.NextAttempt = at.Add(5 * time.Minute)
+		row.Source.WindowStart, row.Source.WindowEnd = batch.WindowStart, batch.WindowEnd
 	}
 	raw, encodeErr := json.Marshal(row)
 	if encodeErr == nil {
@@ -132,10 +151,33 @@ func (s *Server) refreshMacroSource(ctx context.Context, c *macroCache, spec mac
 	c.mu.Unlock()
 }
 
+func (s *Server) handleMacroRequest(req rpc.Request) (rpc.MacroSnapshotResult, error) {
+	var in rpc.MacroSnapshotParams
+	if len(req.Params) != 0 {
+		if err := json.Unmarshal(req.Params, &in); err != nil {
+			return rpc.MacroSnapshotResult{}, errors.New("invalid macro window parameters")
+		}
+	}
+	if in.WindowStart == "" && in.WindowEnd == "" {
+		return s.handleMacroSnapshot(), nil
+	}
+	start, e1 := time.Parse(time.DateOnly, in.WindowStart)
+	end, e2 := time.Parse(time.DateOnly, in.WindowEnd)
+	if e1 != nil || e2 != nil || end.Before(start) || end.Sub(start) > 30*24*time.Hour {
+		return rpc.MacroSnapshotResult{}, errors.New("macro window requires both YYYY-MM-DD dates spanning at most 31 days")
+	}
+	return s.macroSnapshotWindow(in.WindowStart, in.WindowEnd), nil
+}
+
 func (s *Server) handleMacroSnapshot() rpc.MacroSnapshotResult {
 	now := s.orderNow().UTC()
 	start := now.Add(-24 * time.Hour).Format(time.DateOnly)
 	end := now.AddDate(0, 0, 7).Format(time.DateOnly)
+	return s.macroSnapshotWindow(start, end)
+}
+
+func (s *Server) macroSnapshotWindow(start, end string) rpc.MacroSnapshotResult {
+	now := s.orderNow().UTC()
 	out := rpc.MacroSnapshotResult{AsOf: now, WindowStart: start, WindowEnd: end, CoverageStatus: "partial", Events: []rpc.MacroEvent{}, Publications: []rpc.MacroPublication{}, Sources: []rpc.MacroSource{}}
 	s.mu.Lock()
 	cache := s.macro
@@ -158,7 +200,7 @@ func (s *Server) handleMacroSnapshot() rpc.MacroSnapshotResult {
 		}
 		source := record.Source
 		source.Stale = source.LastSuccess.IsZero() || now.Before(source.LastSuccess.Add(-time.Minute)) || !now.Before(source.ValidUntil)
-		if source.Availability != "available" || source.Stale {
+		if source.Availability != "available" || source.Stale || source.WindowStart != "" && (start < source.WindowStart || end > source.WindowEnd) {
 			out.CoverageStatus = "partial"
 		}
 		out.Sources = append(out.Sources, source)
@@ -192,23 +234,25 @@ func (s *Server) handleMacroSnapshot() rpc.MacroSnapshotResult {
 	})
 	if len(out.Events) > 48 {
 		out.Events = out.Events[:48]
-		out.Truncated = true
+		out.EventsTruncated = true
 	}
 	if len(out.Publications) > 12 {
 		out.Publications = out.Publications[:12]
-		out.Truncated = true
+		out.PublicationsTruncated = true
 	}
 	// This public overview is bounded independently of the complete source cache.
 	for {
+		out.Truncated = out.EventsTruncated || out.PublicationsTruncated
 		raw, _ := json.Marshal(out)
 		if len(raw) <= 28<<10 {
 			break
 		}
-		out.Truncated = true
 		if len(out.Publications) > 0 {
 			out.Publications = out.Publications[:len(out.Publications)-1]
+			out.PublicationsTruncated = true
 		} else if len(out.Events) > 0 {
 			out.Events = out.Events[:len(out.Events)-1]
+			out.EventsTruncated = true
 		} else {
 			break
 		}
@@ -237,6 +281,15 @@ func validateMacroEnvelope(spec macrosource.Spec, record macroRecord, now time.T
 	}
 	if source.LastAttempt.After(now.Add(time.Minute)) || source.LastSuccess.After(source.LastAttempt) {
 		return errors.New("invalid public source attempt clock")
+	}
+	if source.ConsecutiveFailures < 0 || source.FirstFailure.After(source.LastAttempt) || source.NextAttempt.After(source.LastAttempt.Add(time.Hour)) || !source.NextAttempt.IsZero() && source.NextAttempt.Before(source.LastAttempt) {
+		return errors.New("invalid public source failure interval")
+	}
+	if (source.ConsecutiveFailures == 0) != source.FirstFailure.IsZero() || source.Availability == "available" && source.ConsecutiveFailures != 0 {
+		return errors.New("invalid public source failure state")
+	}
+	if source.WindowStart != record.Batch.WindowStart || source.WindowEnd != record.Batch.WindowEnd {
+		return errors.New("public source coverage mismatch")
 	}
 	if source.LastSuccess.IsZero() {
 		if source.Availability != "unavailable" || !source.ValidUntil.IsZero() || len(record.Batch.Events)+len(record.Batch.Publications) != 0 {

@@ -222,13 +222,15 @@ Public economic calendar, official publications and source coverage.
 Guard `read-only`. Also available as an MCP tool.
 
 ```text
-canary macro [--json]
+canary macro [--window-start DATE --window-end DATE] [--json]
 ```
 
 **Flags**
 
 | Flag | Takes a value | Allowed values |
 |------|---------------|----------------|
+| `--window-start` | yes | - |
+| `--window-end` | yes | - |
 | `--json` | no | - |
 
 ## `canary regime`

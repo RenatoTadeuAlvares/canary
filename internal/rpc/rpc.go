@@ -1149,6 +1149,9 @@ type RegimeIndicatorMeta struct {
 type RegimeFreshness struct {
 	Class         string `json:"class"`
 	MaxAgeSeconds int64  `json:"max_age_seconds,omitempty"`
+	// NextDueAt is a producer-verified publication boundary for a not_due
+	// daily close. It never makes the observation confirmation-eligible.
+	NextDueAt *time.Time `json:"next_due_at,omitempty"`
 }
 
 // Regime freshness values compare a row with its native publication cadence.

@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/osauer/canary/v2/internal/publichttp"
 )
 
 // WikipediaURL is the canonical source the project scrapes for the
@@ -17,14 +19,6 @@ import (
 // and the daemon's runtime refresher land on the same page; changing
 // one without the other would silently desync.
 const WikipediaURL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-
-// UserAgent identifies our scraper to Wikipedia ops. Their bot policy
-func UserAgent(version string) string {
-	if version == "" {
-		version = "dev"
-	}
-	return fmt.Sprintf("canary/%s (https://github.com/osauer/canary; +breadth indicator)", version)
-}
 
 // HTTPTimeout bounds the Wikipedia fetch. 15 s comfortably covers a
 // than help the caller. A failed fetch falls back to whatever's already
@@ -113,14 +107,14 @@ func ParseHTML(html []byte) ([]string, error) {
 // Network errors, non-200 responses, and parse failures all surface as
 // errors; sanity-bound enforcement (MinMembers ≤ N ≤ MaxMembers) is the
 // CALLER's job because release-time and runtime want different
-// behaviour on bounds-fail. The version argument is folded into the
-// User-Agent so Wikipedia ops can correlate scrapes to releases.
-func FetchAndParse(ctx context.Context, url, version string) ([]string, time.Time, error) {
+// behaviour on bounds-fail. Request identity follows the shared anonymous
+// public-data policy used by both runtime and release-time collection.
+func FetchAndParse(ctx context.Context, url string) ([]string, time.Time, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	req.Header.Set("User-Agent", UserAgent(version))
+	publichttp.SetUserAgent(req)
 	req.Header.Set("Accept", "text/html")
 
 	client := &http.Client{Timeout: HTTPTimeout}

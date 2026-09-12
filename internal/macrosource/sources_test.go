@@ -117,6 +117,9 @@ func TestPublicClientRejectsFailuresAndRedirectsWithoutCredentials(t *testing.T)
 		if r.Method != "GET" || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
 			t.Fatal("public source request carried authority")
 		}
+		if !strings.Contains(r.UserAgent(), "Chrome/153.0.0.0") || strings.Contains(r.UserAgent(), "github.com") {
+			t.Fatal("BLS lost its witnessed anonymous request identity")
+		}
 		// BEA's RSS server negotiates text/xml and otherwise returns HTTP 406.
 		if !strings.Contains(r.Header.Get("Accept"), "text/xml") {
 			t.Fatal("official RSS XML response excluded by content negotiation")
@@ -137,5 +140,83 @@ func TestPublicClientRejectsFailuresAndRedirectsWithoutCredentials(t *testing.T)
 	_, err = client.Fetch(context.Background(), sourceSpec(t, "bls-calendar"), time.Now())
 	if err == nil || strings.Contains(err.Error(), "private diagnostic") {
 		t.Fatal("raw transport details escaped public source status")
+	}
+}
+
+// TestBLSAccessDenialNeedsResponseEvidence prevents a generic failure from
+// becoming an invented entitlement diagnosis or leaking the denial page.
+func TestBLSAccessDenialNeedsResponseEvidence(t *testing.T) {
+	const denial = `<html><h1>Bureau of Labor Statistics</h1><h2>Access Denied</h2><p>bot activity that doesn&#39;t conform to BLS usage policy is prohibited.</p><p>response-only-marker</p></html>`
+	const classified = "source returned HTTP 403: BLS rejected this request under its automated-access policy"
+	for _, tc := range []struct {
+		name, source, body string
+		status             int
+		readFailure        bool
+		want               string
+	}{
+		{"witnessed BLS denial", "bls-calendar", denial, 403, false, classified},
+		{"generic BLS forbidden", "bls-calendar", "Access Denied", 403, false, "source returned HTTP 403"},
+		{"BLS identity absent", "bls-calendar", strings.ReplaceAll(denial, "Bureau of Labor Statistics", "unrelated service"), 403, false, "source returned HTTP 403"},
+		{"policy evidence absent", "bls-calendar", `<h1>Bureau of Labor Statistics</h1><h2>Access Denied</h2>`, 403, false, "source returned HTTP 403"},
+		{"foreign source", "bea-calendar", denial, 403, false, "source returned HTTP 403"},
+		{"different status", "bls-calendar", denial, 503, false, "source returned HTTP 503"},
+		{"failed body read", "bls-calendar", denial, 403, true, "source returned HTTP 403"},
+		{"oversized body", "bls-calendar", denial + strings.Repeat("x", 8<<10), 403, false, "source returned HTTP 403"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewClient()
+			requests := 0
+			client.HTTP.Transport = publicTransport(func(r *http.Request) (*http.Response, error) {
+				requests++
+				var body io.Reader = strings.NewReader(tc.body)
+				if tc.readFailure {
+					body = io.MultiReader(body, publicReadFailure{})
+				}
+				return &http.Response{StatusCode: tc.status, Header: make(http.Header), Body: io.NopCloser(body), Request: r}, nil
+			})
+			batch, err := client.Fetch(t.Context(), sourceSpec(t, tc.source), time.Now())
+			if err == nil || err.Error() != tc.want || requests != 1 || len(batch.Events)+len(batch.Publications) != 0 {
+				t.Fatalf("unwitnessed diagnosis, response leak or fabricated recovery: %v", err)
+			}
+		})
+	}
+}
+
+type publicReadFailure struct{}
+
+func (publicReadFailure) Read([]byte) (int, error) {
+	return 0, errors.New("response-only-reader-error")
+}
+
+func TestPublicClientRedirectReappliesDestinationIdentity(t *testing.T) {
+	for _, hosts := range [][2]string{
+		{"www.bls.gov", "www.newyorkfed.org"},
+		{"www.newyorkfed.org", "www.bls.gov"},
+	} {
+		t.Run(hosts[0]+"-to-"+hosts[1], func(t *testing.T) {
+			client := NewClient()
+			requests := 0
+			client.HTTP.Transport = publicTransport(func(req *http.Request) (*http.Response, error) {
+				if requests >= len(hosts) || req.URL.Hostname() != hosts[requests] {
+					t.Fatal("unexpected redirect request")
+				}
+				wantBrowser := req.URL.Hostname() == "www.bls.gov"
+				if strings.Contains(req.UserAgent(), "Chrome/153.0.0.0") != wantBrowser {
+					t.Fatal("redirect inherited the previous destination's identity")
+				}
+				if !wantBrowser && req.UserAgent() != "Go-http-client/1.1" {
+					t.Fatal("generic destination leaked personal or browser identity")
+				}
+				requests++
+				if requests == 1 {
+					return &http.Response{StatusCode: 302, Header: http.Header{"Location": {"https://" + hosts[1] + "/calendar"}}, Body: io.NopCloser(strings.NewReader("")), Request: req}, nil
+				}
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("public fixture")), Request: req}, nil
+			})
+			body, err := client.read(t.Context(), "https://"+hosts[0]+"/calendar")
+			if err != nil || string(body) != "public fixture" || requests != 2 {
+				t.Fatalf("permitted redirect failed: requests=%d err=%v", requests, err)
+			}
+		})
 	}
 }

@@ -196,7 +196,7 @@ func (s *Server) fetchMarketHistory(ctx context.Context, req *rpc.Request) (*rpc
 	result.PriceBasis = series.WhatToShow
 	result.RegularHoursOnly = interval == "1 day"
 	result.RequestedStart = marketHistoryStart(p.Range, now)
-	if len(bars) > 2000 {
+	if len(bars) > ibkrlib.ChartMaxBars {
 		return nil, errors.New("history exceeds bounded series size")
 	}
 	for _, b := range bars {
@@ -235,15 +235,23 @@ func marketHistoryStart(r string, now time.Time) time.Time {
 	case "5D":
 		return now.AddDate(0, 0, -7)
 	case "1M":
-		return now.AddDate(0, -1, 0)
+		return marketHistoryMonthsBefore(now, 1)
 	case "6M":
-		return now.AddDate(0, -6, 0)
+		return marketHistoryMonthsBefore(now, 6)
 	case "YTD":
 		return time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
 	case "1Y":
-		return now.AddDate(-1, 0, 0)
+		return marketHistoryMonthsBefore(now, 12)
 	case "5Y":
-		return now.AddDate(-5, 0, 0)
+		return marketHistoryMonthsBefore(now, 60)
 	}
 	return now
+}
+
+// Clamp to the destination month end instead of normalizing an impossible date
+// into the following month and silently shortening the requested history.
+func marketHistoryMonthsBefore(now time.Time, months int) time.Time {
+	first := time.Date(now.Year(), now.Month(), 1, now.Hour(), now.Minute(), now.Second(), now.Nanosecond(), now.Location()).AddDate(0, -months, 0)
+	lastDay := first.AddDate(0, 1, -1).Day()
+	return time.Date(first.Year(), first.Month(), min(now.Day(), lastDay), now.Hour(), now.Minute(), now.Second(), now.Nanosecond(), now.Location())
 }
