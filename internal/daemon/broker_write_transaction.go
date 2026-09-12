@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/osauer/canary/v2/internal/rpc"
 	ibkrlib "github.com/osauer/canary/v2/pkg/ibkr"
@@ -25,19 +26,21 @@ type brokerWriteTransactionBinding struct {
 	//lint:ignore U1000 Used by the trading-tagged order submission path.
 	orderID int
 	//lint:ignore U1000 Used by the trading-tagged order submission path.
-	orderEventSeq              int64
-	tradingControlGeneration   uint64
-	riskBound                  bool
-	riskDraft                  rpc.OrderDraft
-	riskPosition               rpc.OrderPositionImpact
-	riskPortfolioGeneration    uint64
-	riskPortfolioAccount       string
-	riskBaseCurrency           string
-	riskBaseCurrencyProvenance ibkrlib.AccountBaseCurrencyProvenance
-	riskNotional               orderNotionalAuthority
-	exerciseBound              bool
-	exerciseDraft              rpc.OrderDraft
-	testOnly                   bool
+	orderEventSeq                 int64
+	tradingControlGeneration      uint64
+	riskBound                     bool
+	optionExitExpiresAt           time.Time
+	optionExitTerminalFingerprint string
+	riskDraft                     rpc.OrderDraft
+	riskPosition                  rpc.OrderPositionImpact
+	riskPortfolioGeneration       uint64
+	riskPortfolioAccount          string
+	riskBaseCurrency              string
+	riskBaseCurrencyProvenance    ibkrlib.AccountBaseCurrencyProvenance
+	riskNotional                  orderNotionalAuthority
+	exerciseBound                 bool
+	exerciseDraft                 rpc.OrderDraft
+	testOnly                      bool
 }
 
 func (s *Server) currentTradingStatus() rpc.TradingStatus {
@@ -299,6 +302,15 @@ func (s *Server) brokerWireGuard(binding brokerWriteTransactionBinding, status r
 			return fmt.Errorf("%w: trading controls changed after admission; refresh and retry", ErrTradingDisabled)
 		}
 		if binding.riskBound {
+			if !binding.optionExitExpiresAt.IsZero() && !s.orderNow().Before(binding.optionExitExpiresAt) {
+				return fmt.Errorf("%w: option economic-role evidence expired before broker send", ErrTradingDisabled)
+			}
+			if binding.optionExitTerminalFingerprint != "" {
+				terminal, ok := s.optionExitBoundTerminalEvidence(&binding, s.orderNow())
+				if !ok || optionExitEvidenceHash(terminal) != binding.optionExitTerminalFingerprint {
+					return fmt.Errorf("%w: terminal exposure authority changed before broker send", ErrTradingDisabled)
+				}
+			}
 			current, err := s.captureWireOrderPositionAuthority(binding, status, binding.riskDraft)
 			if err != nil {
 				return err

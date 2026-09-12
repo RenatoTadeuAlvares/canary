@@ -30,6 +30,7 @@ const (
 )
 
 type orderPreviewTokenPayload struct {
+	OptionExitEconomics      *rpc.OptionExitEconomicEvidence       `json:"option_exit_economics,omitempty"`
 	Version                  int                                   `json:"version"`
 	AuthorityEpoch           string                                `json:"authority_epoch"`
 	SignerGeneration         int64                                 `json:"signer_generation"`

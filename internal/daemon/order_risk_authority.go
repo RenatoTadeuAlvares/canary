@@ -689,6 +689,27 @@ func (s *Server) bindPreviewOrderRiskAuthority(ctx context.Context, binding *bro
 		current.BaseCurrencyProvenance != expectedBaseProvenance {
 		return fmt.Errorf("%w: portfolio risk authority changed after preview; preview again", ErrTradingDisabled)
 	}
+	if payload.OptionExitEconomics != nil {
+		if binding.connector == nil {
+			return brokerWriteTransactionDriftError()
+		}
+		projection, ok := binding.connector.CapturePortfolioProjectionForSession(binding.session)
+		if !ok || projection.Generation != current.Generation {
+			return brokerWriteTransactionDriftError()
+		}
+		terminal := s.optionExitTerminalEvidence(projection.Positions, s.orderNow())
+		if optionExitEvidenceHash(terminal) != payload.OptionExitEconomics.TerminalFingerprint {
+			return fmt.Errorf("%w: terminal exposure authority changed", ErrTradingDisabled)
+		}
+		scope := optionExitBookScope{Scope: binding.scope,
+			Session:    fmt.Sprintf("%p/%d/%v", binding.connector, binding.connectorEpoch, binding.session),
+			Generation: current.Generation, BaseCurrency: current.BaseCurrency, Terminal: terminal}
+		if err := validateOptionExitTokenEvidence(payload.OptionExitEconomics, optionExitScopeHash(scope), current.Generation, s.orderNow()); err != nil {
+			return err
+		}
+		binding.optionExitExpiresAt = payload.OptionExitEconomics.AsOf.Add(optionExitEvidenceBudget)
+		binding.optionExitTerminalFingerprint = payload.OptionExitEconomics.TerminalFingerprint
+	}
 	signedNotional := payload.NotionalAuthority
 	if current.TestOnly && signedNotional.QuoteNotional == 0 {
 		signedNotional = orderNotionalAuthority{

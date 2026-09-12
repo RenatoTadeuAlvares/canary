@@ -460,9 +460,14 @@ type TradeProposal struct {
 // leaves purpose unresolved. Values are daemon-authored from cost basis and
 // a fresh executable bid; adapters render them without re-evaluating thresholds.
 type TradeProposalOptionExit struct {
-	Kind         string `json:"kind"`
-	Intent       string `json:"intent"`
-	EconomicRole string `json:"economic_role,omitempty"`
+	// Readiness is ready, waiting, or blocked. Ready is advisory eligibility,
+	// never broker-write authority. Snapshot blockers always take precedence.
+	Readiness string `json:"readiness,omitempty"`
+	// EconomicEvidence binds the measured role to an exact complete book.
+	EconomicEvidence *OptionExitEconomicEvidence `json:"economic_evidence,omitempty"`
+	Kind             string                      `json:"kind"`
+	Intent           string                      `json:"intent"`
+	EconomicRole     string                      `json:"economic_role,omitempty"`
 	// ExitManagement is standalone, independent (operator-declared), or
 	// grouped_or_unresolved. It never grants economic-role or order authority.
 	ExitManagement       string   `json:"exit_management,omitempty"`
@@ -482,6 +487,17 @@ type TradeProposalOptionExit struct {
 	MinTrailAbs          float64  `json:"min_trail_abs,omitempty"`
 	SpreadMultiple       float64  `json:"spread_multiple,omitempty"`
 	Method               string   `json:"method,omitempty"`
+}
+
+// OptionExitEconomicEvidence identifies daemon-validated exact risk receipts.
+// Scope is stable for one physical session/account/portfolio generation;
+// Fingerprint identifies the newer measurements used for this evaluation.
+type OptionExitEconomicEvidence struct {
+	TerminalFingerprint string    `json:"terminal_fingerprint,omitempty"`
+	Scope               string    `json:"scope"`
+	Fingerprint         string    `json:"fingerprint"`
+	AsOf                time.Time `json:"as_of"`
+	PortfolioGeneration uint64    `json:"portfolio_generation"`
 }
 
 // TradeProposalTrailSizing is the daemon-owned explanation for a protective

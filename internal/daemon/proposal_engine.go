@@ -25,11 +25,13 @@ const (
 )
 
 type proposalEngine struct {
-	mu      sync.Mutex
-	server  *Server
-	store   *proposalStore
-	cadence time.Duration
-	now     func() time.Time
+	optionExitSource       optionExitEvidenceSource // in-process synthetic evidence seam
+	lastOptionExitEvidence optionExitBookEvidence
+	mu                     sync.Mutex
+	server                 *Server
+	store                  *proposalStore
+	cadence                time.Duration
+	now                    func() time.Time
 	// scope resolves the connected broker session identity. Test seam;
 	// nil falls back to server.currentBrokerStateScope.
 	scope    func() brokerStateScope
@@ -601,6 +603,16 @@ func (e *proposalEngine) generate(ctx context.Context, policy protectionPolicy, 
 			intents := directionalOptionIntents(policy.Buckets.TrailingStop.Options)
 			strategyLegs, ambiguousStrategies := optionExitStrategyScope(pos, intents, now)
 			rulebookPolicy := risk.DefaultRulebookPolicy()
+			var economicEvidence optionExitBookEvidence
+			for _, row := range pos.Options {
+				intent, declared := intents[row.ConID]
+				if declared && !now.Before(intent.ApprovedAt) && now.Before(intent.ExpiresAt) && row.Quantity > 0 {
+					// One complete book per refresh; independent exits still
+					// participate together in the same exposure calculation.
+					economicEvidence = e.optionExitEvidence(ctx, pos, now)
+					break
+				}
+			}
 			for _, row := range pos.Options {
 				if row.Quantity == 0 {
 					continue
@@ -610,11 +622,15 @@ func (e *proposalEngine) generate(ctx context.Context, policy protectionPolicy, 
 				exactRow := optionExitWithoutQuote(row)
 				// Missing intent still creates review work, without spending a
 				// broker quote request on a contract that cannot yet qualify.
-				if intentCurrent && row.Quantity > 0 {
+				if intentCurrent && row.Quantity > 0 && !economicEvidence.Closed {
 					exactRow = e.optionExitExactQuote(ctx, row)
 				}
 				standalone := !strategyLegs[row.ConID] && !ambiguousStrategies[strings.ToUpper(strings.TrimSpace(row.Symbol))]
-				roleAllowed, economicRole := optionExitEconomicRole(row, rulebookPolicy)
+				rowEvidence := optionExitEvidenceAt(economicEvidence, e.clock())
+				roleAllowed, economicRole := optionExitEconomicRole(row, rulebookPolicy, rowEvidence)
+				if economicEvidence.Closed && e.optionExitPreviouslyProtection(row.ConID) {
+					roleAllowed, economicRole = false, risk.IndexPutRoleProtection
+				}
 				decision := evaluateOptionExit(policy.Buckets.TrailingStop.Options, exactRow, now, intentCurrent, standalone, roleAllowed, rulebookPolicy.ExitActLossPct)
 				if decision.Action == "" && len(decision.Blockers) == 0 {
 					continue
@@ -624,6 +640,10 @@ func (e *proposalEngine) generate(ctx context.Context, policy protectionPolicy, 
 					minTick = e.resolveRowMinTick(exactRow)
 				}
 				if p, ok := optionExitProposal(policy, status, exactRow, sources, now, decision, economicRole, minTick, rulebookPolicy.ExitActLossPct); ok {
+					explainOptionExitEconomicBlocker(&p, rowEvidence)
+					if rowEvidence.Fingerprint != "" {
+						p.OptionExit.EconomicEvidence = &rpc.OptionExitEconomicEvidence{Scope: rowEvidence.Scope, Fingerprint: rowEvidence.Fingerprint, AsOf: rowEvidence.AsOf, PortfolioGeneration: rowEvidence.Generation, TerminalFingerprint: rowEvidence.TerminalFingerprint}
+					}
 					p.OptionExit.ExitManagement = "standalone"
 					if !standalone {
 						p.OptionExit.ExitManagement = "grouped_or_unresolved"
@@ -642,6 +662,7 @@ func (e *proposalEngine) generate(ctx context.Context, policy protectionPolicy, 
 						}
 					}
 					if !e.isIgnored(scope, p.Key) {
+						setOptionExitReadiness(&p, rowEvidence.Closed)
 						out = append(out, p)
 					}
 				}
@@ -1389,15 +1410,16 @@ func optionExitIndependentInferredPair(strategy rpc.PositionStrategy, intents ma
 // optionExitEconomicRole refuses to infer intent from a hedge-listed put's
 // product shape. Such a contract must be economically directional under the
 // current Rulebook as well as explicitly declared directional by the operator.
-func optionExitEconomicRole(row rpc.PositionView, pol risk.RulebookPolicy) (bool, string) {
+func optionExitEconomicRole(row rpc.PositionView, pol risk.RulebookPolicy, evidence ...optionExitBookEvidence) (bool, string) {
 	if !pol.IsHedgeSymbol(row.Symbol) || !strings.EqualFold(strings.TrimSpace(row.Right), "P") {
 		return true, risk.IndexPutRoleDirectional
 	}
-	// The general positions Greeks cache is keyed by underlying/expiry/right/
-	// rounded strike and cannot prove SPX versus SPXW (or another exact class).
-	// Until option Greeks carry a positive-ConID receipt, every hedge-listed
-	// put remains unclassified here; a symbol-shape or shared-cache role must
-	// never authorize selling a possible hedge.
+	if len(evidence) == 1 && evidence[0].Scope != "" && evidence[0].Fingerprint != "" && !evidence[0].AsOf.IsZero() {
+		role := evidence[0].Roles[row.ConID]
+		if role == risk.IndexPutRoleDirectional || role == risk.IndexPutRoleProtection {
+			return role == risk.IndexPutRoleDirectional, role
+		}
+	}
 	return false, risk.IndexPutRoleUnclassified
 }
 
@@ -1410,14 +1432,18 @@ func (e *proposalEngine) optionExitExactQuote(ctx context.Context, row rpc.Posit
 	if e == nil || e.server == nil || row.ConID <= 0 {
 		return row
 	}
-	authority, err := e.server.captureOrderPreviewBrokerAuthority()
-	if err != nil || authority == nil {
-		return row
-	}
 	contract := proposalContractFromPosition(row, positionWireSecType(row.SecType))
-	quote, err := e.server.previewExactSessionContractQuoteWithReady(ctx, authority, contract, optionExitQuoteTimeout, func(q *rpc.Quote) bool {
-		return q != nil && q.Bid != nil && q.Ask != nil
-	})
+	var quote rpc.OrderQuoteSnapshot
+	var err error
+	if e.optionExitSource != nil {
+		quote, err = e.optionExitSource.quote(ctx, contract)
+	} else {
+		authority, captureErr := e.server.captureOrderPreviewBrokerAuthority()
+		if captureErr != nil || authority == nil {
+			return row
+		}
+		quote, err = (optionExitBrokerSource{server: e.server, authority: authority}).quote(ctx, contract)
+	}
 	if err != nil {
 		return row
 	}
@@ -1746,6 +1772,10 @@ func (e *proposalEngine) Preview(ctx context.Context, p rpc.TradeProposalPreview
 		e.appendBlocked(prop, prop.Key, prop.Revision, blockers, nil)
 		return rpc.TradeProposalPreviewResult{Proposal: prop, PreviewTokenID: preview.PreviewTokenID, PreviewTokenExpiresAt: preview.PreviewTokenExpiresAt, SubmitEligible: false, Preview: sanitizeProposalPreviewForProposal(preview, prop), Blockers: blockers, AsOf: now}, nil
 	}
+	if blockers := e.revalidateOptionExitEconomics(ctx, prop, preview); len(blockers) > 0 {
+		e.appendBlocked(prop, prop.Key, prop.Revision, blockers, nil)
+		return rpc.TradeProposalPreviewResult{Proposal: prop, Blockers: blockers, AsOf: e.clock()}, nil
+	}
 	return rpc.TradeProposalPreviewResult{Accepted: true, Proposal: prop, PreviewTokenID: preview.PreviewTokenID, PreviewTokenExpiresAt: preview.PreviewTokenExpiresAt, SubmitEligible: preview.SubmitEligible, Preview: sanitizeProposalPreviewForProposal(preview, prop), AsOf: now}, nil
 }
 
@@ -1869,6 +1899,10 @@ func (e *proposalEngine) Submit(ctx context.Context, p rpc.TradeProposalSubmitPa
 		blockers := previewNotSubmitEligibleBlockers(preview)
 		e.appendBlocked(prop, prop.Key, prop.Revision, blockers, nil)
 		return rpc.TradeProposalSubmitResult{Proposal: prop, Preview: sanitizeProposalPreviewForProposal(preview, prop), PreviewTokenID: preview.PreviewTokenID, Blockers: blockers, AsOf: now}, nil
+	}
+	if blockers := e.revalidateOptionExitEconomics(ctx, prop, preview); len(blockers) > 0 {
+		e.appendBlocked(prop, prop.Key, prop.Revision, blockers, nil)
+		return rpc.TradeProposalSubmitResult{Proposal: prop, Blockers: blockers, AsOf: e.clock()}, nil
 	}
 	place, err := e.server.proposalPlaceOrder(ctx, rpc.OrderPlaceParams{PreviewToken: preview.PreviewToken, TimeoutMs: p.TimeoutMs, Origin: p.Origin})
 	if err != nil {
@@ -2288,7 +2322,7 @@ func proposalPreviewSafetyBlockers(prop rpc.TradeProposal, preview *rpc.OrderPre
 		if !full {
 			add("option_exit_fresh_full_close_required", "fresh preview evidence does not prove a full close of the current long exact-contract position", "Refresh positions and preview the full exact-contract close again.")
 		}
-		if prop.Contract.ConID <= 0 || preview.Draft.Contract.ConID != prop.Contract.ConID {
+		if !sameOptionExitContract(prop.Contract, preview.Draft.Contract) {
 			add("option_exit_contract_drift", "preview exact contract does not match the option-exit proposal", "Refresh proposals and preview the exact contract again.")
 		}
 		for _, blocker := range optionExitPreviewDecisionBlockers(prop, preview) {
@@ -2499,6 +2533,9 @@ func cloneOptionExit(in *rpc.TradeProposalOptionExit) *rpc.TradeProposalOptionEx
 		return nil
 	}
 	out := *in
+	if in.EconomicEvidence != nil {
+		out.EconomicEvidence = new(*in.EconomicEvidence)
+	}
 	out.CostBasisPremium = cloneFloat64Ptr(in.CostBasisPremium)
 	out.ReferencePrice = cloneFloat64Ptr(in.ReferencePrice)
 	out.ReturnPct = cloneFloat64Ptr(in.ReturnPct)
@@ -2874,6 +2911,15 @@ func proposalRevision(policy rpc.Fingerprint, sources rpc.TradeProposalSourceFin
 	}{Policy: policy, Account: strings.ToUpper(strings.TrimSpace(scope.Account)), Mode: strings.ToLower(strings.TrimSpace(scope.Mode)), Sources: stableSources}
 	for _, p := range proposals {
 		projection.Proposal = append(projection.Proposal, p.Key+":"+strconv.Itoa(p.Quantity)+":"+p.PositionEffect)
+		if p.OptionExit != nil {
+			// Receipt times/values refresh at preview; scope and resulting role
+			// are semantic revision inputs. Never churn solely on receipt time.
+			binding := p.OptionExit.EconomicRole
+			if p.OptionExit.EconomicEvidence != nil {
+				binding += ":" + p.OptionExit.EconomicEvidence.Scope
+			}
+			projection.Proposal = append(projection.Proposal, binding)
+		}
 	}
 	raw, _ := json.Marshal(projection)
 	sum := sha256.Sum256(raw)

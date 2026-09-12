@@ -273,6 +273,9 @@ type ConnectorConfig struct {
 
 // Subscription holds the latest values for one streaming market-data request.
 type Subscription struct {
+	exactContract                Contract
+	exactSession                 ConnectorSessionBinding
+	optionRisk                   *OptionRiskMeasurement
 	LastAt, BidAt, AskAt, MarkAt time.Time
 	Symbol                       string
 	// SessionEpoch is set for exact-session subscriptions. Zero identifies a
@@ -4045,6 +4048,7 @@ func (c *Connector) SubscribeMarketDataWithContractForSession(ctx context.Contex
 		c.reqIDMap[reqID] = key
 		c.subscriptions[key] = &Subscription{
 			Symbol: key, ReqID: reqID, Fields: fields, LastTime: time.Now(), SessionEpoch: binding.epoch,
+			exactContract: wireContract, exactSession: binding,
 			RejectCh: make(chan SubscriptionRejection, 1),
 		}
 		c.subMu.Unlock()
@@ -5513,7 +5517,8 @@ func (c *Connector) registerHandlers(conn *Connection) {
 	})
 
 	// Register option computation handler (msgID 21) for greeks and model IV
-	conn.RegisterHandler(msgTickOptionComputation, func(fields []string) {
+	conn.RegisterHandlerAtEpoch(msgTickOptionComputation, func(fields []string, epoch uint64) {
+		c.handleExactOptionRisk(ConnectorSessionBinding{connector: c, connection: conn, epoch: epoch}, fields)
 		c.handleOptionComputation(fields)
 	})
 

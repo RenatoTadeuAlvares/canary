@@ -46,8 +46,9 @@ Status: implemented locally; execution parameters approved
   hedge-listed index put must additionally be
   classified `directional` by the current Rulebook economic-role classifier.
   A `protection`, conflicting, or unclassified role blocks the proposal.
-  Current shared-cache Greeks cannot prove exact option class, so hedge-listed
-  puts remain unclassified in V1 until positive-ConID Greeks authority ships.
+  Shared-cache Greeks cannot prove exact option class. The daemon collects
+  fresh positive-ConID model receipts for the complete book; absent or invalid
+  exact evidence keeps the role unclassified.
 - **Session and quality:** proposals require the regular listed-options session,
   live fresh timestamped two-sided bid/ask, positive cost basis, at least 14
   calendar DTE, and spread no wider than 25% of mid. Missing or stale evidence
@@ -73,7 +74,7 @@ Status: implemented locally; execution parameters approved
 | Concept | Authoritative source | Typed field or contract | Freshness or finality | Fallback or blocker |
 |---|---|---|---|---|
 | Exact directional intent | versioned protection policy | `directional_intents[]` (`con_id`, reason, approved/expiry times) | current loaded policy fingerprint and unexpired declaration | absent, future or expired declaration blocks |
-| Economic hedge role | `internal/risk` Rulebook classifier plus exact-contract Greeks gate | `LegInput.IndexPutRole`; option-exit V1 requires positive-ConID Greeks evidence | current complete positions, delta, underlying, whole-book exposure and exact option class | protection, partial/shared-cache book or unknown blocks; hedge-listed puts are therefore review-only in V1 |
+| Economic hedge role | `internal/risk` Rulebook classifier plus exact-contract Greeks gate | `LegInput.IndexPutRole`; `option_exit.economic_evidence` binds scope and receipts | current complete positions, delta, underlying, explicit FX, whole-book exposure and exact option class | protection, partial/shared-cache book or unknown blocks |
 | Cost and position | daemon positions snapshot from broker account state | `PositionView.AvgCost`, `Multiplier`, `Quantity`, `ConID` | current proposal refresh | missing, non-positive or fractional blocks |
 | Executable option price | daemon exact-contract quote authority | positive-ConID non-sharing subscription, `OrderQuoteSnapshot` | new broker price-tick receipt after the request boundary, live and during RTH | stale, delayed, missing or wide blocks |
 | Threshold decision | pure risk evaluator | `risk.OptionExitDecision` | recomputed on refresh and against the preview's newer exact quote | no threshold means no proposal; unavailable evidence emits a blocked review row |
@@ -150,9 +151,9 @@ executable-price request or actionable directional exit can qualify.
 
 ## Incremental exact-contract evidence extension
 
-The September coverage change does not clear the economic-role blocker. The
-smallest useful next evidence extension belongs in Canary, with no new model
-or risk thresholds:
+The exact-contract extension is implemented locally with synthetic proof.
+Regular-session broker commissioning remains separate. It introduces no new
+model calls or risk thresholds:
 
 1. Bind a fresh, non-sharing option subscription to a positive ConID, complete
    contract identity and the current broker session. Capture model-computation
@@ -186,6 +187,85 @@ execution. A complete exact book classified directional should qualify only
 when the existing intent, strategy, DTE, quote, spread and order gates also
 pass. Real regular-session broker evidence is a separate commissioning check;
 hermetic fixtures cannot prove entitlement or live option liquidity.
+
+### Receipt and execution contract
+
+`pkg/ibkr.OptionRiskMeasurement` is an atomic model-computation receipt from
+one non-sharing subscription. It carries the full requested contract, request
+ID, physical-session epoch, request/receipt times, data type and nullable delta
+and underlying. Only model ticks populate it. Partial computations replace
+missing components with nil, zero delta stays observed, and price ticks cannot
+freshen it. Unknown, delayed and frozen data cannot qualify.
+
+The collector compares every nonzero position with the broker's complete
+account-scoped structural projection. Unsupported instruments, missing rows,
+duplicate identities, account changes and reconnects fail closed. Every option
+needs exact model evidence; stocks need fresh live prices; foreign currencies
+need an exact live FX quote. Existing current exact cancelled/dissolved stock
+authority may account for a terminal row excluded by `analysisPositions`.
+Missing prices never grant that exemption. Terminal fingerprints and validity
+are rechecked through the broker wire guard.
+
+The existing grouping and exposure aggregation feed
+`risk.ClassifyCompleteIndexPutRoles`. This entry point uses the unchanged
+Rulebook bands. It normalizes the put numerator to account base currency in a
+private classifier copy and restores native spot pointers afterward; original
+spot and FX inputs and the general advisory Rulebook path are unchanged.
+
+Collection has a 20-second infrastructure evidence lifetime. The proof's
+`as_of` is the collection request boundary; every accepted model, stock-price
+and non-identity FX receipt must be at or after that boundary. Completion does
+not renew the lifetime. Scope (physical session, account, structural portfolio
+generation, base currency and terminal authority) and resulting role enter the
+proposal revision. The exact receipt fingerprint is carried in
+`option_exit.economic_evidence`; ordinary new receipts do not falsely stale an
+otherwise unchanged proposal.
+
+Both preview and submit refresh proposals, then collect/reclassify again after
+the ordinary exact-order preview/WhatIf. Scope drift, protection, missing
+evidence, changed intent/grouping or contract/class mismatch blocks. The newer
+proof is signed into the existing preview token with expiry bounded from the
+original collection boundary, then checked at admission and before broker
+send. Existing all-client duplicate-order, full-quantity, freeze, mode,
+account, journal and transaction-specific broker-write gates still apply.
+
+### Waiting and actionable blockers
+
+`option_exit.readiness` is daemon-authored and additive:
+
+- `ready`: an action passed the row's advisory checks; it is never execution
+  permission. Snapshot, account, trading and preview blockers take precedence.
+- `waiting`: a `kind = "review"` row whose live collection was intentionally
+  deferred after a complete current structural/account check and an official
+  known closed session. It is an exit watch, not an executable order.
+- `blocked`: actionable, unsupported, unknown or failed evidence, including
+  mixed waiting/actionable causes and measured protection.
+
+Waiting permits only `option_rth_closed`, `live_option_quote_required`,
+`fresh_option_quote_required`, `two_sided_option_quote_required`,
+`directional_role_not_confirmed` and `option_exit_measurement_unavailable`.
+The last code is the consequence of the same deferred measurement, not an
+additional diagnosis. All blockers remain in the payload. Reference price and
+return stay unavailable. The generic role blocker alone never establishes
+waiting: the collector must positively report the intentional deferral.
+Previously measured protection and known model/FX/stock-data failures in the
+same scope remain blocked after close. A successful live collection clears a
+known data failure; closing the exchange does not.
+
+Fixed, redacted blocker messages distinguish exact model data, stock pricing,
+currency data, complete-book/scope failures, unknown calendars, intentional
+deferral and measured protection. No private broker text creates authority.
+
+### Local proof limits
+
+Synthetic connector, risk, generation, preview-contract, token-age and wire
+guard tests cover the evidence path. Regular-session entitlement, callback
+availability, full-book collection latency and liquidity still require a
+read-only commissioning check. The bounded sequential collector may time out
+on a large/slow book; that remains unclassified and is reported as a blocker.
+This change does not install or restart services, edit private policy, request
+a live order preview, or submit an order. Integration/install and Desk rendering
+validation belong to the parent task.
 
 ## Remaining owner choices
 
