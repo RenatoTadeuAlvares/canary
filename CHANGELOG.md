@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented here. The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html), and release entries follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) categories (Added / Changed / Deprecated / Removed / Fixed / Security).
 
+## v3.6.0 — 2026-09-12 21:15 CEST
+
+### What's new
+
+- **Continuous desk displays can follow broker updates.** `canary market --watch --json` streams account, position, P/L, and quote updates with explicit account scope and separate source times.
+- **Charts retain validated history through feed outages and daemon restarts.** Saved data keeps its original dates and coverage, and a failed refresh cannot replace a usable series with missing data.
+
+### Changed
+
+- **Option-exit reviews distinguish ready, waiting, and blocked conditions.** Independently managed option pairs retain separate reviews, while hedge-listed puts require current evidence from the complete portfolio before qualifying for a directional exit.
+- **Broker-write authority, trading limits, and freeze controls are unchanged.** Readiness is advisory; portfolio protection and fresh exact-contract evidence remain binding.
+
+### Fixed
+
+- **Held options no longer disappear from review when grouping or required evidence is unresolved.**
+- **Broker trade times no longer appear newer because another update arrived.** Market-session labels follow the original trade time.
+- **Stock fields that apply only to options no longer falsely block the complete-portfolio check.** Closed-session reviews can wait for live data without displaying an exit price or return.
+
+### Security
+
+- **The relay development image decoder dependency is updated.** The deployed Worker bundle is unchanged.
+
 ## v3.5.0 — 2026-09-12 08:57 CEST
 
 ### What's new

@@ -2,6 +2,12 @@
 
 Updated: 2026-09-12
 
+Version 3.6 adds `canary market --watch --json`, a read-only stream of broker
+display updates with account scope and separate source clocks. Validated chart
+history survives restart and feed outages as dated saved context. Option-exit
+reviews distinguish waiting for the regular session from missing evidence;
+portfolio-protection checks and broker-write authority remain binding.
+
 Canary is a local Interactive Brokers risk desk built as a Go daemon, a
 shell CLI, a read-only stdio MCP server, a Claude Desktop MCPB, a Claude Code
 plugin, a paired app, and a clean-room TWS protocol library. The daemon owns the
