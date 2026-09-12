@@ -69,7 +69,7 @@ func inferTwoLegStrategy(underlying string, rows []rpc.PositionView) (rpc.Positi
 	legs := make([]rpc.PositionStrategyLeg, 0, len(rows))
 	quantities := make([]int, 0, len(rows))
 	for _, row := range rows {
-		if !strings.EqualFold(strings.TrimSpace(row.SecType), "OPT") {
+		if kind := strings.ToUpper(strings.TrimSpace(row.SecType)); kind != "OPT" && kind != "OPTION" {
 			return rpc.PositionStrategy{}, fmt.Errorf("only exact option contracts can be reconstructed")
 		}
 		if row.ConID <= 0 {

@@ -1428,7 +1428,7 @@ func optionExitBlockerMessage(code string, cfg protectionTrailOptionPolicy) stri
 	case "standalone_option_required":
 		return "option belongs to or may belong to a multi-leg strategy; close it through the strategy workflow"
 	case "directional_role_not_confirmed":
-		return "current Rulebook role is protection or unknown; option exit cannot sell a possible hedge"
+		return "exact-contract risk evidence has not confirmed directional exposure; current shared Greeks cannot establish this role, and declared intent alone cannot authorize removing possible protection"
 	case "long_option_required":
 		return "option exit V1 supports long option positions only"
 	case "whole_contract_quantity_required":

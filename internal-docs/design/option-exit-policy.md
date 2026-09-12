@@ -30,6 +30,9 @@ Status: implemented locally; execution parameters approved
 - **Aggregation unit:** one exact broker option contract (`con_id`). V1 accepts
   only positive whole-contract long positions that are not part of, or
   ambiguously associated with, a reconstructed multi-leg strategy.
+  Broker position types `OPT` and `OPTION` identify the same option security;
+  reconstruction accepts both and emits canonical `OPT` contracts. Exact IDs,
+  whole quantities and ambiguity checks remain required.
 - **Directional intent:** the exact contract must have a time-bounded
   `directional_intents` record with reason, approval time and expiry. A
   hedge-listed index put must additionally be
