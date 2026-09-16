@@ -4071,6 +4071,18 @@ func (c *Connector) SubscribeMarketDataWithContract(ctx context.Context, contrac
 // unique key prevents a symbol/route cache entry from a different contract or
 // socket satisfying broker-write evidence.
 func (c *Connector) SubscribeMarketDataWithContractForSession(ctx context.Context, binding ConnectorSessionBinding, contract Contract, fields []string) (string, error) {
+	return c.subscribeMarketDataWithContractForSession(ctx, binding, contract, fields, OptionSubscriptionGenericTicks+",165,221,233,236")
+}
+
+// SubscribeDefaultMarketDataWithContractForSession creates an exact-session
+// subscription for IBKR's default bid/ask/last price-and-size tick set. It
+// deliberately requests no generic ticks, making it suitable for delayed-data
+// reconciliation that must not depend on option or auxiliary observations.
+func (c *Connector) SubscribeDefaultMarketDataWithContractForSession(ctx context.Context, binding ConnectorSessionBinding, contract Contract, fields []string) (string, error) {
+	return c.subscribeMarketDataWithContractForSession(ctx, binding, contract, fields, "")
+}
+
+func (c *Connector) subscribeMarketDataWithContractForSession(ctx context.Context, binding ConnectorSessionBinding, contract Contract, fields []string, genericTicks string) (string, error) {
 	if c == nil || !c.SessionCurrent(binding) {
 		return "", fmt.Errorf("broker session changed before exact quote request")
 	}
@@ -4096,7 +4108,7 @@ func (c *Connector) SubscribeMarketDataWithContractForSession(ctx context.Contex
 	}
 	wireContract := contract
 	normalizeResolvedOptionMarketDataContract(&wireContract)
-	reqID, err := conn.requestMarketDataWithContractForEpoch(ctx, wireContract, OptionSubscriptionGenericTicks+",165,221,233,236", false, false, binding.epoch, func(reqID int) func() {
+	reqID, err := conn.requestMarketDataWithContractForEpoch(ctx, wireContract, genericTicks, false, false, binding.epoch, func(reqID int) func() {
 		c.subMu.Lock()
 		c.reqIDMap[reqID] = key
 		c.subscriptions[key] = &Subscription{

@@ -70,6 +70,20 @@ func TestExactSessionOptionQuoteCarriesCanonicalIdentityAndClearsUnderlyingPrima
 	assertField(t, marketData, 14, contract.TradingClass, "marketData tradingClass")
 }
 
+func TestExactSessionDefaultQuoteRequestsNoGenericTicks(t *testing.T) {
+	conn, connector, oldSocket, _, _ := newQueuedInstructionReconnectFixture(t)
+	binding, ok := connector.CaptureSession()
+	if !ok {
+		t.Fatal("capture exact quote session")
+	}
+	if _, err := connector.SubscribeDefaultMarketDataWithContractForSession(context.Background(), binding, exactQuoteTestContract(900002), []string{"BID", "ASK", "LAST"}); err != nil {
+		t.Fatalf("subscribe exact default quote: %v", err)
+	}
+	frames := decodeOutboundFrames(t, conn, oldSocket.Bytes())
+	marketData := findOutboundFrame(t, frames, reqMktData)
+	assertField(t, marketData, 16, "", "default quote generic ticks")
+}
+
 func TestExactSessionFXQuoteUsesCanonicalExplicitPairWithoutPositiveConID(t *testing.T) {
 	conn, connector, oldSocket, _, _ := newQueuedInstructionReconnectFixture(t)
 	binding, ok := connector.CaptureSession()
