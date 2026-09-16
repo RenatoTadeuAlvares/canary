@@ -44,6 +44,29 @@ func TestSnapshotExecutionsRequiresMatchingExecDetailsEnd(t *testing.T) {
 	}
 }
 
+func TestSnapshotExecutionsAcceptsModernExecDetailsEndShape(t *testing.T) {
+	c, conn, _ := newHistoricalFeeRateTestConnector(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	result := make(chan ExecutionSnapshot, 1)
+	errs := make(chan error, 1)
+	go func() {
+		snapshot, err := c.SnapshotExecutions(ctx, "DUT111026")
+		result <- snapshot
+		errs <- err
+	}()
+	waitForSnapshotHandler(t, conn, msgExecDetailsEnd)
+	epoch := conn.BrokerSessionEpoch()
+	// Modern servers omit the legacy version field; reqID follows msgID.
+	conn.processMessageAtEpoch(conn.encodeMsg(msgExecDetailsEnd, "1"), epoch)
+	if err := <-errs; err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := <-result; !snapshot.Complete || snapshot.Generation != epoch {
+		t.Fatalf("snapshot=%+v", snapshot)
+	}
+}
+
 func TestSnapshotExecutionsTimeoutFailsClosed(t *testing.T) {
 	c, _, _ := newHistoricalFeeRateTestConnector(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)

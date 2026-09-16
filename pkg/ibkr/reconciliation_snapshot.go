@@ -139,12 +139,12 @@ func (c *Connector) SnapshotExecutions(ctx context.Context, account string) (Exe
 	endHandler := binding.connection.RegisterHandlerAtEpoch(msgExecDetailsEnd, func(fields []string, epoch uint64) {
 		mu.Lock()
 		defer mu.Unlock()
-		if epoch != binding.epoch || len(fields) < 3 {
+		if epoch != binding.epoch {
 			mixed = true
 			return
 		}
-		endID, parseErr := strconv.Atoi(strings.TrimSpace(fields[2]))
-		if parseErr != nil || endID != reqID {
+		endID, ok := executionEndRequestID(fields)
+		if !ok || endID != reqID {
 			contradictory = true
 			return
 		}
@@ -176,4 +176,24 @@ func (c *Connector) SnapshotExecutions(ctx context.Context, account string) (Exe
 		return ExecutionSnapshot{AsOf: time.Now().UTC(), Session: binding}, ErrSnapshotContradiction
 	}
 	return ExecutionSnapshot{Complete: true, Executions: executions, AsOf: time.Now().UTC(), Session: binding, Generation: binding.epoch}, nil
+}
+
+// executionEndRequestID accepts the modern [message ID, request ID] end
+// receipt and the legacy [message ID, version, request ID] form. No other
+// shape can establish execution-snapshot completion.
+func executionEndRequestID(fields []string) (int, bool) {
+	for len(fields) > 0 && strings.TrimSpace(fields[len(fields)-1]) == "" {
+		fields = fields[:len(fields)-1]
+	}
+	var raw string
+	switch len(fields) {
+	case 2:
+		raw = fields[1]
+	case 3:
+		raw = fields[2]
+	default:
+		return 0, false
+	}
+	id, err := strconv.Atoi(strings.TrimSpace(raw))
+	return id, err == nil
 }
