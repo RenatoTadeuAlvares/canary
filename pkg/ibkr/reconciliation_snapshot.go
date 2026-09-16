@@ -163,7 +163,7 @@ func (c *Connector) SnapshotExecutions(ctx context.Context, account string) (Exe
 	select {
 	case <-done:
 	case <-ctx.Done():
-		return ExecutionSnapshot{AsOf: time.Now().UTC(), Session: binding}, fmt.Errorf("%w: %v", ErrExecutionSnapshotIncomplete, ctx.Err())
+		return ExecutionSnapshot{AsOf: time.Now().UTC(), Session: binding}, fmt.Errorf("%w: %w", ErrExecutionSnapshotIncomplete, ctx.Err())
 	}
 	mu.Lock()
 	bad := mixed || contradictory

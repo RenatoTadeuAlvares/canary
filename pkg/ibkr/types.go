@@ -60,6 +60,12 @@ type MarketData struct {
 	BidSize           int       `json:"bid_size"`
 	AskSize           int       `json:"ask_size"`
 	LastSize          int       `json:"last_size"`
+	BidObserved       bool      `json:"bid_observed,omitempty"`
+	AskObserved       bool      `json:"ask_observed,omitempty"`
+	LastObserved      bool      `json:"last_observed,omitempty"`
+	BidSizeObserved   bool      `json:"bid_size_observed,omitempty"`
+	AskSizeObserved   bool      `json:"ask_size_observed,omitempty"`
+	LastSizeObserved  bool      `json:"last_size_observed,omitempty"`
 	OpenInt           int64     `json:"open_int"`
 	OpenIntObserved   bool      `json:"open_int_observed,omitempty"`
 	ShortableShares   int64     `json:"shortable_shares,omitempty"`

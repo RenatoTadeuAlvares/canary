@@ -339,8 +339,12 @@ type Subscription struct {
 	BidSize   int64
 	AskSize   int64
 	LastSize  int64
-	Volume    int64
-	AvgVolume int64
+	// The receipt flags distinguish a broker-reported zero from a field that
+	// has not arrived on this subscription. They are observation metadata only.
+	BidObserved, AskObserved, LastObserved             bool
+	BidSizeObserved, AskSizeObserved, LastSizeObserved bool
+	Volume                                             int64
+	AvgVolume                                          int64
 	// OpenInt is the option open interest at this contract: tick 27
 	// (callOpenInterest) for CALL legs, tick 28 (putOpenInterest) for
 	// PUT legs. The gateway also emits a zero-valued companion tick for
@@ -5860,10 +5864,13 @@ func (c *Connector) handleTickPrice(fields []string) {
 				switch tickType {
 				case 1, 66:
 					sub.Bid = price
+					sub.BidObserved = true
 				case 2, 67:
 					sub.Ask = price
+					sub.AskObserved = true
 				case 4, 68:
 					sub.LastPrice = price
+					sub.LastObserved = true
 				case 9, 75:
 					sub.PrevClose = price
 				case 37:
@@ -5933,10 +5940,13 @@ func (c *Connector) handleTickPrice(fields []string) {
 	switch tickType {
 	case 1, 66:
 		sub.Bid = price
+		sub.BidObserved = true
 	case 2, 67:
 		sub.Ask = price
+		sub.AskObserved = true
 	case 4, 68:
 		sub.LastPrice = price
+		sub.LastObserved = true
 	case 6, 72:
 		sub.High = price
 	case 7, 73:
@@ -8001,10 +8011,13 @@ func (c *Connector) handleTickSize(fields []string) {
 	switch tickType {
 	case 0, 69:
 		sub.BidSize = size
+		sub.BidSizeObserved = true
 	case 3, 70:
 		sub.AskSize = size
+		sub.AskSizeObserved = true
 	case 5, 75:
 		sub.LastSize = size
+		sub.LastSizeObserved = true
 	case 8, 74:
 		sub.Volume = size
 	case 21:
@@ -8521,6 +8534,12 @@ func (c *Connector) MarketDataSnapshot() map[string]*MarketData {
 			BidSize:           int(sub.BidSize),
 			AskSize:           int(sub.AskSize),
 			LastSize:          int(sub.LastSize),
+			BidObserved:       sub.BidObserved,
+			AskObserved:       sub.AskObserved,
+			LastObserved:      sub.LastObserved,
+			BidSizeObserved:   sub.BidSizeObserved,
+			AskSizeObserved:   sub.AskSizeObserved,
+			LastSizeObserved:  sub.LastSizeObserved,
 			Volume:            sub.Volume,
 			AvgVolume:         sub.AvgVolume,
 			LastTickAt:        sub.LastTickAt,

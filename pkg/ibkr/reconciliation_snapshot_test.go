@@ -52,6 +52,9 @@ func TestSnapshotExecutionsTimeoutFailsClosed(t *testing.T) {
 	if !errors.Is(err, ErrExecutionSnapshotIncomplete) {
 		t.Fatalf("err=%v", err)
 	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v does not retain the caller deadline", err)
+	}
 }
 
 func TestSnapshotPositionsPreviousEpochCompletionFailsClosed(t *testing.T) {
@@ -79,6 +82,34 @@ func TestSnapshotExecutionsMixedGenerationFailsClosed(t *testing.T) {
 	waitForSnapshotHandler(t, conn, msgExecDetailsEnd)
 	conn.resetOrderIDReadiness()
 	conn.processMessageAtEpoch(conn.encodeMsg(msgExecDetails, "11", "1", "1001", "265598", "ABC", "STK", "", "0", "", "1", "SMART", "GBP", "ABC", "exec-old", "20260912 10:00:00", "DUT111026", "SMART", "BOT", "2", "100", "987654", "31", "0", "2", "100", "reconciliation-test"), oldEpoch)
+	if err := <-result; !errors.Is(err, ErrExecutionSnapshotIncomplete) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestSnapshotExecutionsPreviousEpochCompletionFailsClosed(t *testing.T) {
+	c, conn, _ := newHistoricalFeeRateTestConnector(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	result := make(chan error, 1)
+	oldEpoch := conn.BrokerSessionEpoch()
+	go func() { _, err := c.SnapshotExecutions(ctx, "DUT111026"); result <- err }()
+	waitForSnapshotHandler(t, conn, msgExecDetailsEnd)
+	conn.resetOrderIDReadiness()
+	conn.processMessageAtEpoch(conn.encodeMsg(msgExecDetailsEnd, "1", "1"), oldEpoch)
+	if err := <-result; !errors.Is(err, ErrExecutionSnapshotIncomplete) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestSnapshotExecutionsDisconnectBeforeCompletionFailsClosed(t *testing.T) {
+	c, conn, _ := newHistoricalFeeRateTestConnector(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { _, err := c.SnapshotExecutions(ctx, "DUT111026"); result <- err }()
+	waitForSnapshotHandler(t, conn, msgExecDetailsEnd)
+	conn.status = StatusDisconnected
 	if err := <-result; !errors.Is(err, ErrExecutionSnapshotIncomplete) {
 		t.Fatalf("err=%v", err)
 	}
