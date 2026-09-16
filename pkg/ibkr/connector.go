@@ -3615,10 +3615,12 @@ func parseContractDetailsLite(fields []string, expectedReqID int, serverVersion 
 }
 
 type contractDetailsClassification struct {
-	industry    string
-	category    string
-	subcategory string
-	stockType   string
+	isin         string
+	isinConflict bool
+	industry     string
+	category     string
+	subcategory  string
+	stockType    string
 }
 
 // parseContractDetailsClassification follows the official contractData
@@ -3709,8 +3711,20 @@ func parseContractDetailsClassification(fields []string, serverVersion int) (con
 			return contractDetailsClassification{}, false
 		}
 	}
-	if version >= 7 && !cursor.stringPairs() { // secIdList
-		return contractDetailsClassification{}, false
+	if version >= 7 {
+		count, ok := cursor.integer()
+		if !ok || count < 0 || count > len(fields)/2 {
+			return contractDetailsClassification{}, false
+		}
+		for range count {
+			tag, value := cursor.string(), cursor.string()
+			if tag == "ISIN" {
+				if classification.isin != "" && classification.isin != value {
+					classification.isinConflict = true
+				}
+				classification.isin = value
+			}
+		}
 	}
 	if serverVersion >= minServerVerAggGroup {
 		if _, ok = cursor.integer(); !ok {
