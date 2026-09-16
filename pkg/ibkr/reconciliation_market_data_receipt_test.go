@@ -14,7 +14,12 @@ func TestMarketDataSnapshotRetainsDelayedBidAskLastAndSizeReceipts(t *testing.T)
 	c.handleTickPrice([]string{"1", "2", "42", "68", "120.15"})
 	c.handleTickSize([]string{"2", "6", "42", "69", "0"})
 	c.handleTickSize([]string{"2", "6", "42", "70", "25"})
-	c.handleTickSize([]string{"2", "6", "42", "75", "10"})
+	// Delayed tick type 75 is the prior close price, not delayed last size.
+	c.handleTickSize([]string{"2", "6", "42", "75", "999"})
+	if got := c.MarketDataSnapshot()["VUAG"]; got.LastSizeObserved {
+		t.Fatalf("delayed close tick incorrectly marked last size received: %+v", got)
+	}
+	c.handleTickSize([]string{"2", "6", "42", "71", "10"})
 
 	got := c.MarketDataSnapshot()["VUAG"]
 	if got == nil || !got.BidObserved || !got.AskObserved || !got.LastObserved || !got.BidSizeObserved || !got.AskSizeObserved || !got.LastSizeObserved {

@@ -8002,7 +8002,8 @@ func (c *Connector) handleTickSize(fields []string) {
 	// IBKR tick types: 0=BID_SIZE, 3=ASK_SIZE, 8=VOLUME (cumulative day total).
 	// 21=average volume, delivered by the Misc Stats generic-tick bundle (165).
 	// Delayed subscriptions use 69/70/74 for bid size / ask size / volume.
-	// 5=LAST_SIZE; delayed subscriptions use 75.
+	// 5=LAST_SIZE; delayed subscriptions use 71. Tick 75 is delayed close
+	// price and is handled by handleTickPrice.
 	// 27=callOpenInterest, 28=putOpenInterest. On option-leg subscriptions,
 	// the gateway emits a zero-valued companion tick for the opposite right,
 	// so only the tick matching Subscription.Right may commit OpenInt. On
@@ -8015,7 +8016,7 @@ func (c *Connector) handleTickSize(fields []string) {
 	case 3, 70:
 		sub.AskSize = size
 		sub.AskSizeObserved = true
-	case 5, 75:
+	case 5, 71:
 		sub.LastSize = size
 		sub.LastSizeObserved = true
 	case 8, 74:

@@ -529,7 +529,7 @@ func TestHandleTickSize_DispatchesByTickType(t *testing.T) {
 	c.handleTickSize([]string{"2", "6", "7", "74", "9876544"})  // delayed_volume
 	c.handleTickSize([]string{"2", "6", "7", "21", "58900000"}) // avg_volume
 	c.handleTickSize([]string{"2", "6", "7", "5", "999"})       // last_size
-	c.handleTickSize([]string{"2", "6", "7", "75", "1000"})     // delayed_last_size
+	c.handleTickSize([]string{"2", "6", "7", "71", "1000"})     // delayed_last_size
 
 	c.subMu.RLock()
 	sub := c.subscriptions["AAPL"]
