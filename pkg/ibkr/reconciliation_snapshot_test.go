@@ -67,6 +67,68 @@ func TestSnapshotExecutionsAcceptsModernExecDetailsEndShape(t *testing.T) {
 	}
 }
 
+func TestSnapshotExecutionsCompletesEmptyWithMatchingEnd(t *testing.T) {
+	c, conn, _ := newHistoricalFeeRateTestConnector(t)
+	result := make(chan ExecutionSnapshot, 1)
+	errs := make(chan error, 1)
+	go func() {
+		snapshot, err := c.SnapshotExecutions(context.Background(), "DUT111026")
+		result <- snapshot
+		errs <- err
+	}()
+	waitForSnapshotHandler(t, conn, msgExecDetailsEnd)
+	epoch := conn.BrokerSessionEpoch()
+	conn.processMessageAtEpoch(conn.encodeMsg(msgExecDetailsEnd, "1", "1"), epoch)
+	if err := <-errs; err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := <-result; !snapshot.Complete || len(snapshot.Executions) != 0 {
+		t.Fatalf("snapshot=%+v, want complete empty snapshot", snapshot)
+	}
+}
+
+func TestSnapshotExecutionsWrongEndIsIncomplete(t *testing.T) {
+	c, conn, _ := newHistoricalFeeRateTestConnector(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	result := make(chan ExecutionSnapshot, 1)
+	errs := make(chan error, 1)
+	go func() {
+		snapshot, err := c.SnapshotExecutions(ctx, "DUT111026")
+		result <- snapshot
+		errs <- err
+	}()
+	waitForSnapshotHandler(t, conn, msgExecDetailsEnd)
+	epoch := conn.BrokerSessionEpoch()
+	conn.processMessageAtEpoch(conn.encodeMsg(msgExecDetailsEnd, "1", "2"), epoch)
+	if err := <-errs; !errors.Is(err, ErrExecutionSnapshotIncomplete) {
+		t.Fatalf("err=%v, want wrong execDetailsEnd failure", err)
+	}
+	if snapshot := <-result; snapshot.Complete || len(snapshot.Executions) != 0 {
+		t.Fatalf("snapshot=%+v, want incomplete empty snapshot", snapshot)
+	}
+}
+
+func TestSnapshotPositionsCompletesEmptyOnPositionEnd(t *testing.T) {
+	c, conn, _ := newHistoricalFeeRateTestConnector(t)
+	result := make(chan PositionSnapshot, 1)
+	errs := make(chan error, 1)
+	go func() {
+		snapshot, err := c.SnapshotPositions(context.Background())
+		result <- snapshot
+		errs <- err
+	}()
+	waitForSnapshotHandler(t, conn, msgPositionEnd)
+	epoch := conn.BrokerSessionEpoch()
+	conn.processMessageAtEpoch(conn.encodeMsg(msgPositionEnd, "1"), epoch)
+	if err := <-errs; err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := <-result; !snapshot.Complete || len(snapshot.Positions) != 0 {
+		t.Fatalf("snapshot=%+v, want complete empty snapshot", snapshot)
+	}
+}
+
 func TestSnapshotExecutionsTimeoutFailsClosed(t *testing.T) {
 	c, _, _ := newHistoricalFeeRateTestConnector(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)

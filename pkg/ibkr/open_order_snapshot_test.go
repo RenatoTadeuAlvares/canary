@@ -58,6 +58,22 @@ func TestSnapshotOpenOrdersCompletesOnOpenOrderEnd(t *testing.T) {
 	}
 }
 
+func TestSnapshotOpenOrdersCompletesEmptyOnOpenOrderEnd(t *testing.T) {
+	c := NewConnector(&ConnectorConfig{})
+	c.requestAllOpenOrders = func() error {
+		c.finishOpenOrderSnapshot()
+		return nil
+	}
+
+	snapshot, err := c.SnapshotOpenOrders(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.Complete || len(snapshot.Orders) != 0 {
+		t.Fatalf("snapshot=%+v, want complete empty snapshot", snapshot)
+	}
+}
+
 func TestSnapshotOpenOrdersCapturesLifecycleGeneration(t *testing.T) {
 	c := NewConnector(&ConnectorConfig{})
 	fields := openOrderSnapshotTestFields("1001", "987654")
@@ -101,6 +117,22 @@ func TestSnapshotOpenOrdersTimeoutIsIncomplete(t *testing.T) {
 	}
 	if len(snap.Orders) != 1 {
 		t.Fatalf("partial orders = %d, want 1", len(snap.Orders))
+	}
+}
+
+func TestSnapshotOpenOrdersWithoutEndIsIncompleteEvenWhenEmpty(t *testing.T) {
+	c := NewConnector(&ConnectorConfig{})
+	c.openOrderSnapshotTimeout = 10 * time.Millisecond
+	c.requestAllOpenOrders = func() error { return nil }
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	snapshot, err := c.SnapshotOpenOrders(ctx)
+	if !errors.Is(err, ErrOpenOrderSnapshotPoisoned) {
+		t.Fatalf("err=%v, want missing openOrderEnd failure", err)
+	}
+	if snapshot.Complete || len(snapshot.Orders) != 0 {
+		t.Fatalf("snapshot=%+v, want incomplete empty snapshot", snapshot)
 	}
 }
 
