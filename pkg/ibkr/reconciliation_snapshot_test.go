@@ -194,7 +194,9 @@ func TestSnapshotExecutionsDisconnectBeforeCompletionFailsClosed(t *testing.T) {
 	result := make(chan error, 1)
 	go func() { _, err := c.SnapshotExecutions(ctx, "DUT111026"); result <- err }()
 	waitForSnapshotHandler(t, conn, msgExecDetailsEnd)
-	conn.status = StatusDisconnected
+	if err := conn.Disconnect(); err != nil {
+		t.Fatal(err)
+	}
 	if err := <-result; !errors.Is(err, ErrExecutionSnapshotIncomplete) {
 		t.Fatalf("err=%v", err)
 	}
@@ -207,7 +209,9 @@ func TestSnapshotPositionsDisconnectBeforeCompletionFailsClosed(t *testing.T) {
 	result := make(chan error, 1)
 	go func() { _, err := c.SnapshotPositions(ctx); result <- err }()
 	waitForSnapshotHandler(t, conn, msgPositionEnd)
-	conn.status = StatusDisconnected
+	if err := conn.Disconnect(); err != nil {
+		t.Fatal(err)
+	}
 	if err := <-result; !errors.Is(err, ErrPositionSnapshotIncomplete) {
 		t.Fatalf("err=%v", err)
 	}
